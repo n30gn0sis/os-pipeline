@@ -18,3 +18,9 @@ desktop.ini
 dist/
 build/
 out/
+
+# os-pipeline build output and Python artifacts
+output/
+__pycache__/
+*.egg-info/
+.pytest_cache/
