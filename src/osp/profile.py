@@ -43,7 +43,10 @@ def _load(path: Path, profiles_dir: Path, chain: tuple[Path, ...]) -> dict:
     if key in chain:
         names = " -> ".join(p.stem for p in (*chain, key))
         raise ProfileError(f"extends cycle: {names}")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+        raise ProfileError(f"{path}: {exc}") from exc
     if not isinstance(data, dict):
         raise ProfileError(f"{path}: top level must be a mapping")
     parents = data.pop("extends", None) or []

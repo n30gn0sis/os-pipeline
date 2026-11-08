@@ -81,3 +81,11 @@ def test_profile_accessors_and_defaults():
 def test_profile_autologin_user_is_first_user():
     p = Profile(profile_data(users=[{"name": "a"}, {"name": "b"}], live={"autologin": True}), Path("x"))
     assert p.autologin_user == "a"
+
+
+def test_malformed_yaml_raises_profile_error(tmp_path):
+    pdir = tmp_path / "profiles"
+    pdir.mkdir()
+    (pdir / "x.yaml").write_text("name: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ProfileError, match="x.yaml"):
+        load_merged(pdir / "x.yaml", pdir)
