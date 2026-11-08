@@ -11,8 +11,18 @@ def test_qemu_command_bios_cdrom_tcg():
     assert cmd[0] == "qemu-system-x86_64"
     assert ["-serial", "stdio"] == cmd[cmd.index("-serial"):cmd.index("-serial") + 2]
     assert "-no-reboot" in cmd and "-enable-kvm" not in cmd and ["-cpu", "max"] == cmd[cmd.index("-cpu"):cmd.index("-cpu") + 2]
-    assert f"file={Path('/i.iso')},media=cdrom,readonly=on" in cmd
+    assert f"id=osp-cd,if=none,file={Path('/i.iso')},media=cdrom,readonly=on" in cmd
     assert not any("pflash" in a for a in cmd)
+
+
+def test_qemu_command_attaches_cdrom_via_ahci():
+    # OVMF + direct kernel boot never finds a CD-ROM on the legacy PIIX IDE bus; AHCI works
+    # for both firmwares and both boot paths.
+    cmd = qemu_command(firmware="uefi", kvm=True, vars_path=Path("/w/vars.fd"), cdrom=Path("/i.iso"),
+                       kernel=Path("/w/k"), initrd=Path("/w/i"), append="boot=live")
+    assert ["-device", "ahci,id=osp-ahci"] == cmd[cmd.index("ahci,id=osp-ahci") - 1:cmd.index("ahci,id=osp-ahci") + 1]
+    assert "ide-cd,drive=osp-cd,bus=osp-ahci.0" in cmd
+    assert not any(a.startswith("file=") and "media=cdrom" in a for a in cmd)
 
 
 def test_qemu_command_uefi_kvm_disk_and_kernel():

@@ -96,7 +96,10 @@ def qemu_command(*, firmware: str, kvm: bool, vars_path: Path | None = None, cdr
     elif firmware != "bios":
         raise ValueError(f"unknown firmware {firmware!r}")
     if cdrom:
-        cmd += ["-drive", f"file={cdrom},media=cdrom,readonly=on"]
+        # AHCI, not the default PIIX IDE: under OVMF with -kernel the IDE CD-ROM is never detected.
+        cmd += ["-device", "ahci,id=osp-ahci",
+                "-drive", f"id=osp-cd,if=none,file={cdrom},media=cdrom,readonly=on",
+                "-device", "ide-cd,drive=osp-cd,bus=osp-ahci.0"]
     if disk:
         cmd += ["-drive", f"file={disk},if=virtio,format=qcow2"]
     if kernel:
