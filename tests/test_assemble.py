@@ -63,7 +63,7 @@ def test_find_kernel_requires_initrd(tmp_path):
 def test_installed_packages_parses_dpkg_query(tmp_path):
     (tmp_path / "var/lib/dpkg").mkdir(parents=True)
     (tmp_path / "var/lib/dpkg/status").write_text("")
-    r = RecordingRunner(results={"dpkg-query": (0, "bash\t5.2\nlive-boot\t1:20230131\n")})
+    r = RecordingRunner(results={"dpkg-query": (0, "installed\tbash\t5.2\ninstalled\tlive-boot\t1:20230131\nconfig-files\told\t1.0\n")})
     assert asm.installed_packages(tmp_path, r) == {"bash": "5.2", "live-boot": "1:20230131"}
     assert r.calls[0][1] == f"--admindir={tmp_path}/var/lib/dpkg"
 
@@ -117,3 +117,14 @@ def test_assemble_builds_real_iso(tmp_path):
                              capture_output=True, text=True, check=True).stdout
     for path in ["/live/filesystem.squashfs", "/live/vmlinuz", "/live/initrd.img", "/boot/grub/grub.cfg"]:
         assert f"'{path}'" in listing
+
+
+@pytest.mark.container
+def test_installed_packages_real_dpkg_query(tmp_path):
+    dpkg = tmp_path / "var/lib/dpkg"
+    (dpkg / "info").mkdir(parents=True)
+    (dpkg / "available").write_text("")
+    (dpkg / "status").write_text(
+        "Package: keep\nStatus: install ok installed\nVersion: 1.2\nArchitecture: amd64\n\n"
+        "Package: gone\nStatus: deinstall ok config-files\nVersion: 3.4\nArchitecture: amd64\n\n")
+    assert asm.installed_packages(tmp_path, Runner(log_path=tmp_path / "d.log")) == {"keep": "1.2"}
