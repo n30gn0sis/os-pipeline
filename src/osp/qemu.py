@@ -18,11 +18,13 @@ from osp.run import Runner
 OVMF_CODE = Path("/usr/share/OVMF/OVMF_CODE_4M.fd")
 OVMF_VARS = Path("/usr/share/OVMF/OVMF_VARS_4M.fd")
 INSTALL_ARGS = "osp.install=unattended osp.target=/dev/vda osp.confirm=0 osp.keep_test_marker=1"
+POWEROFF_TIMEOUT = 120
 READY = "OSP-READY"
 PASS = "OSP-CHECK-PASS "
 FAIL = "OSP-CHECK-FAIL "
-DONE_RE = re.compile(r"OSP-CHECKS-DONE (\d+)")
-INSTALL_DONE = "OSP-INSTALL-DONE"
+DONE_RE = re.compile(r"^OSP-CHECKS-DONE (\d+)$")
+INSTALL_DONE = "osp-install: OSP-INSTALL-DONE"
+ANSI_LEAD = re.compile(r"^(?:\x1b\[[0-9;?]*[A-Za-z])+")
 
 
 @dataclass
@@ -37,26 +39,42 @@ class BootResult:
 class CheckParser:
     def __init__(self):
         self.ready = False
+        self.rc: int | None = None
         self.passed: list[str] = []
         self.failed: list[str] = []
 
     def feed(self, line: str) -> str | None:
-        line = line.strip()
-        if READY in line:
+        line = ANSI_LEAD.sub("", line.strip()).strip()
+        if line == READY:
             self.ready = True
-        if PASS in line:
-            self.passed.append(line.split(PASS, 1)[1])
-        elif FAIL in line:
-            self.failed.append(line.split(FAIL, 1)[1])
-        return "done" if DONE_RE.search(line) else None
+            return None
+        if line.startswith(PASS):
+            self.passed.append(line[len(PASS):])
+            return None
+        if line.startswith(FAIL):
+            self.failed.append(line[len(FAIL):])
+            return None
+        m = DONE_RE.match(line)
+        if m and self.ready:
+            self.rc = int(m.group(1))
+            return "done"
+        return None
 
     def result(self, verdict: str, log_path: Path | None) -> BootResult:
+        def fail(reason: str) -> BootResult:
+            return BootResult(False, reason, self.passed, self.failed, log_path)
+
         if verdict != "done":
             seen = "seen" if self.ready else "not seen"
-            return BootResult(False, f"no completion marker ({verdict}); ready marker {seen}",
-                              self.passed, self.failed, log_path)
+            return fail(f"no completion marker ({verdict}); ready marker {seen}")
+        if not self.ready:
+            return fail("ready marker OSP-READY not seen")
+        if self.rc is None:
+            return fail("no completion rc")
+        if self.rc != 0:
+            return fail(f"checks reported rc={self.rc}")
         if self.failed:
-            return BootResult(False, f"{len(self.failed)} check(s) failed", self.passed, self.failed, log_path)
+            return fail(f"{len(self.failed)} check(s) failed")
         return BootResult(True, "all checks passed", self.passed, self.failed, log_path)
 
 
@@ -86,49 +104,78 @@ def qemu_command(*, firmware: str, kvm: bool, vars_path: Path | None = None, cdr
     return cmd
 
 
+def _read_until(lines: "queue.Queue[str | None]", timeout: float, log, feed) -> str:
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "timeout"
+        try:
+            line = lines.get(timeout=min(remaining, 1.0))
+        except queue.Empty:
+            continue
+        if line is None:
+            return "exited"
+        log.write(line)
+        log.flush()
+        result = feed(line)
+        if result is not None:
+            return result
+
+
+def _await_exit(proc: subprocess.Popen, lines: "queue.Queue[str | None]", log, wait_exit: float) -> bool:
+    """Drain output until EOF and the process exits. False if the wait deadline passes first."""
+    deadline = time.monotonic() + wait_exit
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            line = lines.get(timeout=min(remaining, 1.0))
+        except queue.Empty:
+            continue
+        if line is None:
+            break
+        log.write(line)
+        log.flush()
+    try:
+        proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except subprocess.TimeoutExpired:
+        return False
+    return True
+
+
 def watch(cmd: list[str], *, log_path: Path, timeout: float,
           feed: Callable[[str], str | None], wait_exit: float = 0) -> str:
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, errors="replace")
     lines: "queue.Queue[str | None]" = queue.Queue()
-
-    def pump():
-        for line in proc.stdout:
-            lines.put(line)
-        lines.put(None)
-
-    threading.Thread(target=pump, daemon=True).start()
-    deadline = time.monotonic() + timeout
     verdict = "timeout"
     with open(log_path, "w", encoding="utf-8") as log:
+        proc = None
+        pump = None
         try:
-            while True:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                try:
-                    line = lines.get(timeout=min(remaining, 1.0))
-                except queue.Empty:
-                    continue
-                if line is None:
-                    verdict = "exited"
-                    break
-                log.write(line)
-                log.flush()
-                result = feed(line)
-                if result is not None:
-                    verdict = result
-                    break
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+
+            def pump_lines():
+                for line in proc.stdout:
+                    lines.put(line)
+                lines.put(None)
+
+            pump = threading.Thread(target=pump_lines, daemon=True)
+            pump.start()
+            verdict = _read_until(lines, timeout, log, feed)
             if wait_exit and verdict not in ("timeout", "exited"):
-                try:
-                    proc.wait(timeout=wait_exit)
-                except subprocess.TimeoutExpired:
-                    pass
+                if not _await_exit(proc, lines, log, wait_exit):
+                    verdict = "hung"
         finally:
-            if proc.poll() is None:
-                proc.kill()
-            proc.wait()
+            if proc is not None:
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
+                if pump is not None:
+                    pump.join(timeout=5)
+                proc.stdout.close()
     return verdict
 
 
@@ -166,7 +213,10 @@ def install_test(iso: Path, firmware: str, workdir: Path, log_dir: Path, runner:
         qemu_command(firmware=firmware, kvm=kvm, vars_path=vars_path, cdrom=iso, disk=disk,
                      kernel=kernel, initrd=initrd, append=f"{LIVE_CMDLINE} {INSTALL_ARGS}"),
         log_path=install_log, timeout=install_timeout,
-        feed=lambda line: "installed" if INSTALL_DONE in line else None, wait_exit=120)
+        feed=lambda line: "installed" if INSTALL_DONE in line else None, wait_exit=POWEROFF_TIMEOUT)
+    if verdict == "hung":
+        return BootResult(False, f"installer finished but VM did not power off within {POWEROFF_TIMEOUT}s",
+                          log_path=install_log)
     if verdict != "installed":
         return BootResult(False, f"installer did not finish ({verdict})", log_path=install_log)
 

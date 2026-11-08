@@ -57,13 +57,42 @@ def test_check_parser_failures_and_timeouts():
     assert not r2.ok and "timeout" in r2.reason and "not seen" in r2.reason
 
 
+def test_check_parser_done_before_ready_is_not_terminal():
+    p = CheckParser()
+    assert p.feed("OSP-CHECKS-DONE 0") is None
+    assert not p.result("timeout", Path("l")).ok
+    assert not p.result("done", Path("l")).ok
+
+
+def test_check_parser_nonzero_rc_without_failures_is_not_ok():
+    p = CheckParser()
+    p.feed("OSP-READY")
+    assert p.feed("OSP-CHECKS-DONE 1") == "done"
+    r = p.result("done", Path("l"))
+    assert not r.ok and "rc=1" in r.reason and r.failed == []
+
+
+def test_check_parser_ignores_markers_inside_check_commands():
+    p = CheckParser()
+    p.feed("OSP-READY")
+    assert p.feed("OSP-CHECK-PASS echo OSP-CHECKS-DONE 0") is None
+    assert p.passed == ["echo OSP-CHECKS-DONE 0"]
+    assert p.feed("OSP-CHECKS-DONE 0") == "done"
+
+
+def test_check_parser_accepts_leading_ansi_before_ready():
+    p = CheckParser()
+    assert p.feed("\x1b[0;32mOSP-READY") is None
+    assert p.ready
+
+
 def py(code: str) -> list[str]:
     return [sys.executable, "-u", "-c", code]
 
 
 def test_watch_returns_feed_verdict_and_logs(tmp_path):
     log = tmp_path / "serial.log"
-    verdict = watch(py("print('a'); print('OSP-CHECKS-DONE 0'); import time; time.sleep(30)"),
+    verdict = watch(py("print('OSP-READY'); print('OSP-CHECKS-DONE 0'); import time; time.sleep(30)"),
                     log_path=log, timeout=20, feed=CheckParser().feed)
     assert verdict == "done"
     assert "OSP-CHECKS-DONE 0" in log.read_text()
@@ -73,3 +102,15 @@ def test_watch_exited_and_timeout(tmp_path):
     assert watch(py("print('x')"), log_path=tmp_path / "a.log", timeout=20, feed=lambda l: None) == "exited"
     assert watch(py("import time; time.sleep(30)"), log_path=tmp_path / "b.log", timeout=1,
                  feed=lambda l: None) == "timeout"
+
+
+def test_watch_hung_when_process_outlives_wait_exit(tmp_path):
+    verdict = watch(py("print('MARK'); import time; time.sleep(30)"), log_path=tmp_path / "c.log",
+                    timeout=20, feed=lambda l: "done" if "MARK" in l else None, wait_exit=1)
+    assert verdict == "hung"
+
+
+def test_watch_returns_feed_verdict_when_process_exits_after_marker(tmp_path):
+    verdict = watch(py("print('MARK')"), log_path=tmp_path / "d.log", timeout=20,
+                    feed=lambda l: "done" if "MARK" in l else None, wait_exit=10)
+    assert verdict == "done"
