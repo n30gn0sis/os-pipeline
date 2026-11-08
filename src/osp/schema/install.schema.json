@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://os-pipeline.local/schema/install/1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "target_disk": {"type": "string", "pattern": "^/dev/[A-Za-z0-9/_-]+$"},
+    "hostname": {"type": "string", "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"},
+    "confirm": {"type": "boolean"}
+  }
+}
