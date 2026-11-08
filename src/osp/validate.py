@@ -64,11 +64,20 @@ def _semantic_errors(data: dict, repo_root: Path) -> list[str]:
         if not path.is_file():
             errors.append(f"installer/config: file not found: {config}")
         else:
-            cfg = load_install_config(path)
-            cfg_errors = _schema_errors("install.schema.json", cfg, prefix=f"installer/config ({config}) ")
-            errors += cfg_errors
-            if not cfg_errors and mode == "unattended" and "target_disk" not in cfg:
-                errors.append(f"installer/config ({config}): target_disk is required for unattended mode")
+            try:
+                cfg = load_install_config(path)
+            except (yaml.YAMLError, UnicodeDecodeError, OSError) as exc:
+                cfg = None
+                errors.append(f"installer/config ({config}): unreadable: {exc}")
+            else:
+                if not isinstance(cfg, dict):
+                    cfg = None
+                    errors.append(f"installer/config ({config}): top level must be a mapping")
+            if cfg is not None:
+                cfg_errors = _schema_errors("install.schema.json", cfg, prefix=f"installer/config ({config}) ")
+                errors += cfg_errors
+                if not cfg_errors and mode == "unattended" and "target_disk" not in cfg:
+                    errors.append(f"installer/config ({config}): target_disk is required for unattended mode")
 
     for f in data.get("files", []):
         if not (repo_root / f["src"]).exists():

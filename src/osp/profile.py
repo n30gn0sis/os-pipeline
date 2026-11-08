@@ -52,6 +52,8 @@ def _load(path: Path, profiles_dir: Path, chain: tuple[Path, ...]) -> dict:
     parents = data.pop("extends", None) or []
     if isinstance(parents, str):
         parents = [parents]
+    if not isinstance(parents, list) or not all(isinstance(p, str) for p in parents):
+        raise ProfileError(f"{path}: extends must be a name or a list of names")
     merged: dict = {}
     for name in parents:
         merged = merge(merged, _load(profiles_dir / f"{name}.yaml", profiles_dir, (*chain, key)))

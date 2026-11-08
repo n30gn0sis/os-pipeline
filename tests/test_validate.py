@@ -1,4 +1,5 @@
 import pytest
+import yaml
 
 from helpers import profile_data, write_yaml
 from osp.profile import ProfileError
@@ -92,3 +93,19 @@ def test_load_profile_raises_with_all_errors(tmp_path):
 def test_load_profile_returns_profile(tmp_path):
     p = write_yaml(tmp_path / "profiles" / "ok.yaml", profile_data())
     assert load_profile(p, tmp_path).name == "t"
+
+
+def test_malformed_install_config_is_reported(tmp_path):
+    (tmp_path / "installer").mkdir()
+    (tmp_path / "installer" / "i.yaml").write_text("a: [1\n", encoding="utf-8")
+    out = errs(profile_data(installer={"mode": "unattended", "config": "installer/i.yaml"}), tmp_path)
+    assert "unreadable" in out
+
+
+def test_explicit_null_sections_rejected(tmp_path):
+    p = tmp_path / "profiles" / "nulls.yaml"
+    p.parent.mkdir(parents=True)
+    p.write_text(yaml.safe_dump(profile_data()) + "services:\n", encoding="utf-8")
+    with pytest.raises(ProfileError) as ei:
+        load_profile(p, tmp_path)
+    assert "services" in str(ei.value)

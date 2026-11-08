@@ -83,6 +83,13 @@ def test_profile_autologin_user_is_first_user():
     assert p.autologin_user == "a"
 
 
+def test_non_string_extends_raises_profile_error(tmp_path):
+    pdir = tmp_path / "profiles"
+    child = write_yaml(pdir / "c.yaml", {"extends": 5})
+    with pytest.raises(ProfileError, match="extends"):
+        load_merged(child, pdir)
+
+
 def test_malformed_yaml_raises_profile_error(tmp_path):
     pdir = tmp_path / "profiles"
     pdir.mkdir()
