@@ -24,6 +24,8 @@ PASS = "OSP-CHECK-PASS "
 FAIL = "OSP-CHECK-FAIL "
 DONE_RE = re.compile(r"^OSP-CHECKS-DONE (\d+)$")
 INSTALL_DONE = "osp-install: OSP-INSTALL-DONE"
+# Markers go to /dev/console, so they can follow other output (e.g. a serial login prompt) on one line.
+MARKER_START = re.compile(r"OSP-(?:READY$|CHECK-PASS |CHECK-FAIL |CHECKS-DONE )")
 ANSI_LEAD = re.compile(r"^(?:\x1b\[[0-9;?]*[A-Za-z])+")
 
 
@@ -45,6 +47,9 @@ class CheckParser:
 
     def feed(self, line: str) -> str | None:
         line = ANSI_LEAD.sub("", line.strip()).strip()
+        m = MARKER_START.search(line)
+        if m:
+            line = line[m.start():]
         if line == READY:
             self.ready = True
             return None

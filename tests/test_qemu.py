@@ -102,6 +102,20 @@ def test_check_parser_accepts_leading_ansi_before_ready():
     assert p.ready
 
 
+def test_check_parser_finds_markers_after_a_login_prompt():
+    # osp-ready writes to /dev/console; the serial getty's prompt can share the line.
+    p = CheckParser()
+    p.feed("OSP-READY")
+    assert p.feed("kiosk login: OSP-CHECK-FAIL pgrep -x cage") is None
+    assert p.failed == ["pgrep -x cage"]
+    assert p.feed("host login: OSP-CHECK-PASS echo OSP-CHECKS-DONE 0") is None
+    assert p.passed == ["echo OSP-CHECKS-DONE 0"]
+    assert p.feed("host login: OSP-CHECKS-DONE 1") == "done" and p.rc == 1
+    q = CheckParser()
+    q.feed("host login: OSP-READY")
+    assert q.ready
+
+
 def py(code: str) -> list[str]:
     return [sys.executable, "-u", "-c", code]
 
