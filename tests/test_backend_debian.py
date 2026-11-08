@@ -39,6 +39,13 @@ def test_ubuntu_packages_and_keyring():
     assert cmd[-1].startswith("deb http://security.ubuntu.com/ubuntu noble-security")
 
 
+@pytest.mark.parametrize("flavor,release", [("debian", "bookworm"), ("ubuntu", "noble")])
+def test_bootstrap_includes_apt(flavor, release):
+    # minbase installs Priority:required packages; apt is only 'important' on Ubuntu,
+    # but customize needs apt-get on every flavor.
+    assert "apt" in debian.bootstrap_packages(make(flavor, release))
+
+
 def test_debian_bootstrap_includes_base_and_kernel():
     runner = RecordingRunner()
     debian.bootstrap(make(), Path("/tmp/r"), runner)

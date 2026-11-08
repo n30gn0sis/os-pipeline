@@ -33,7 +33,7 @@ FLAVORS: dict[str, Flavor] = {
 BASE_PACKAGES = (
     "systemd-sysv", "udev", "kmod", "initramfs-tools", "live-boot",
     "grub-pc-bin", "grub-efi-amd64-bin", "grub2-common",
-    "sudo", "locales", "ca-certificates",
+    "apt", "sudo", "locales", "ca-certificates",
 )
 
 
