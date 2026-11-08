@@ -47,10 +47,16 @@ def chroot_mounts(rootfs: Path, runner: Runner):
         for args, rel in _CHROOT_MOUNTS:
             target = Path(rootfs) / rel
             target.mkdir(parents=True, exist_ok=True)
-            runner.run(["mount", *args, str(target)])
+            # Track before mounting so an interrupt between mount and append cannot leak it.
+            # A failed mount leaves a harmless check=False umount of an unmounted path.
             mounted.append(target)
+            runner.run(["mount", *args, str(target)])
         yield
     finally:
         for target in reversed(mounted):
-            if runner.run(["umount", str(target)], check=False).returncode != 0:
-                runner.run(["umount", "-l", str(target)], check=False)
+            # One failing unmount must not skip the remaining targets.
+            try:
+                if runner.run(["umount", str(target)], check=False).returncode != 0:
+                    runner.run(["umount", "-l", str(target)], check=False)
+            except Exception:
+                pass

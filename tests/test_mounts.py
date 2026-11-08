@@ -1,7 +1,7 @@
 import pytest
 
 from osp.mounts import chroot_mounts, mounts_under, safe_rmtree
-from osp.run import RecordingRunner
+from osp.run import CommandError, RecordingRunner
 
 
 def fake_mounts(tmp_path, *mountpoints):
@@ -54,3 +54,21 @@ def test_chroot_mounts_lazy_fallback(tmp_path):
     with chroot_mounts(tmp_path, runner):
         pass
     assert ["umount", "-l", str(tmp_path / "proc")] in runner.calls
+
+
+class FailingDevMountRunner(RecordingRunner):
+    def run(self, cmd, **kwargs):
+        if cmd[0] == "mount" and cmd[-1] == str(self.dev_target):
+            self.calls.append(list(cmd))
+            raise CommandError(cmd, 32, None)
+        return super().run(cmd, **kwargs)
+
+
+def test_chroot_mounts_failed_mount_reraises_and_unmounts_in_reverse(tmp_path):
+    runner = FailingDevMountRunner()
+    runner.dev_target = tmp_path / "dev"  # compared against str(target) in FailingDevMountRunner
+    with pytest.raises(CommandError):
+        with chroot_mounts(tmp_path, runner):
+            pass
+    umounts = [c[-1] for c in runner.calls if c[0] == "umount"]
+    assert umounts == [str(tmp_path / p) for p in ("dev", "sys", "proc")]

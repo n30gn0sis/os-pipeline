@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+import osp.stages as stages
+from osp.mounts import safe_rmtree
 from osp.run import CommandError
 from osp.stages import StageError, run_stage, stages_to_force
 
@@ -69,3 +71,34 @@ def test_failed_stage_removed_without_keep_failed(tmp_path):
         run_stage("customize", "k", out, boom, keep_failed=False, log_path=tmp_path / "c.log", echo=quiet)
     assert not out.exists()
     assert ei.value.log_path == tmp_path / "c.log"
+
+
+def test_failed_stage_keeps_dir_when_cleanup_refused_by_mount(tmp_path, monkeypatch):
+    out = tmp_path / "s"
+    log = tmp_path / "c.log"
+    mounts = tmp_path / "mounts"
+    mounts.write_text(f"x {out.resolve()}/proc ext4 rw 0 0\n")
+    monkeypatch.setattr(stages, "safe_rmtree", lambda p: safe_rmtree(p, mounts))
+
+    def boom(d):
+        raise RuntimeError("x")
+
+    with pytest.raises(StageError) as ei:
+        run_stage("customize", "k", out, boom, keep_failed=False, log_path=log, echo=quiet)
+    msg = str(ei.value)
+    assert "stage 'customize' failed: x" in msg and "work dir kept" in msg and "still mounted" in msg
+    assert ei.value.log_path == log
+    assert out.exists()
+
+
+@pytest.mark.parametrize("garbage", ["{not json", "[1, 2]", ""])
+def test_corrupt_manifest_is_treated_as_not_cached(tmp_path, garbage):
+    out = tmp_path / "s"
+    out.mkdir()
+    (out / "stage.json").write_text(garbage)
+    calls = []
+    run_stage("bootstrap", "k1", out, lambda d: calls.append(d), echo=quiet)
+    assert calls == [out]
+    m = json.loads((out / "stage.json").read_text())
+    assert m["stage"] == "bootstrap" and m["key"] == "k1"
+    assert not (out / "stage.json.tmp").exists()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -36,14 +37,23 @@ def tool_versions() -> dict[str, str]:
     return dict(line.split("\t", 1) for line in res.stdout.splitlines() if "\t" in line)
 
 
+def _read_manifest(path: Path) -> dict | None:
+    """Return the parsed manifest, or None if it is missing, corrupt or not an object."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def run_stage(name: str, key: str, out_dir: Path, fn: Callable[[Path], None], *,
               force: bool = False, keep_failed: bool = True, log_path: Path | None = None,
               echo: Callable[[str], None] = print) -> Path:
     out_dir = Path(out_dir)
     manifest = out_dir / "stage.json"
-    if not force and manifest.is_file():
-        previous = json.loads(manifest.read_text())
-        if previous.get("stage") == name and previous.get("key") == key:
+    if not force:
+        previous = _read_manifest(manifest) if manifest.is_file() else None
+        if previous and previous.get("stage") == name and previous.get("key") == key:
             echo(f"[{name}] cached: {out_dir}")
             return out_dir
     if out_dir.exists():
@@ -53,17 +63,24 @@ def run_stage(name: str, key: str, out_dir: Path, fn: Callable[[Path], None], *,
     try:
         fn(out_dir)
     except BaseException as e:
+        cleanup_note = ""
         if not keep_failed and out_dir.exists():
-            safe_rmtree(out_dir)
-        if isinstance(e, Exception):
-            raise StageError(f"stage '{name}' failed: {e}",
-                             getattr(e, "log_path", None) or log_path) from e
-        raise
-    manifest.write_text(json.dumps({
+            try:
+                safe_rmtree(out_dir)
+            except RuntimeError as cleanup_err:
+                # Still mounted: keep the directory and report it without masking the stage error.
+                cleanup_note = f"; work dir kept: {cleanup_err}"
+        if not isinstance(e, Exception):
+            raise
+        raise StageError(f"stage '{name}' failed: {e}{cleanup_note}",
+                         getattr(e, "log_path", None) or log_path) from e
+    tmp = out_dir / "stage.json.tmp"
+    tmp.write_text(json.dumps({
         "stage": name,
         "key": key,
         "completed": datetime.now(timezone.utc).isoformat(),
         "tool_versions": tool_versions(),
     }, indent=2))
+    os.replace(tmp, manifest)
     echo(f"[{name}] done")
     return out_dir
