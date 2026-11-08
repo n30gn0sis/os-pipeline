@@ -1,0 +1,7 @@
+// Live session only (removed on install): let the sudo group start Calamares without a password.
+polkit.addRule(function (action, subject) {
+  if (action.id == "com.github.calamares.calamares.pkexec.run" &&
+      subject.isInGroup("sudo") && subject.local && subject.active) {
+    return polkit.Result.YES;
+  }
+});
