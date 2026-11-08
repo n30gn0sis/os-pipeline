@@ -24,15 +24,16 @@ INSTALLER_PACKAGES: dict[str, list[str]] = {
 }
 LIVE_PACKAGES = ["live-boot", "live-boot-initramfs-tools"]
 UNITS: dict[str, list[str]] = {
-    "none": ["osp-ready.service"],
-    "unattended": ["osp-ready.service", "osp-installer.service"],
-    "tui": ["osp-ready.service", "osp-installer-tui.service"],
-    "calamares": ["osp-ready.service"],
+    "none": ["osp-ready.service", "osp-ssh-hostkeys.service"],
+    "unattended": ["osp-ready.service", "osp-ssh-hostkeys.service", "osp-installer.service"],
+    "tui": ["osp-ready.service", "osp-ssh-hostkeys.service", "osp-installer-tui.service"],
+    "calamares": ["osp-ready.service", "osp-ssh-hostkeys.service"],
 }
 # (payload path, destination, mode, installer modes or None for all)
 PAYLOAD_FILES = [
     ("osp-ready", "/usr/local/lib/osp/osp-ready", 0o755, None),
     ("osp-ready.service", "/etc/systemd/system/osp-ready.service", 0o644, None),
+    ("osp-ssh-hostkeys.service", "/etc/systemd/system/osp-ssh-hostkeys.service", 0o644, None),
     ("grub-serial.cfg", "/etc/default/grub.d/osp-serial.cfg", 0o644, None),
     ("install-to-disk", "/usr/local/sbin/install-to-disk", 0o755, {"unattended", "tui"}),
     ("osp-installer.service", "/etc/systemd/system/osp-installer.service", 0o644, {"unattended"}),
@@ -79,8 +80,10 @@ def create_users(profile: Profile, secrets: Mapping[str, str], rootfs: Path, run
             cmd += ["--groups", ",".join(user["groups"])]
         chroot(runner, rootfs, *cmd, name)
         if "password_hash_from" in user:
-            chroot(runner, rootfs, "chpasswd", "--encrypted",
-                   input=f"{name}:{secrets[user['password_hash_from']]}\n")
+            pw_hash = secrets[user["password_hash_from"]]
+            if "\n" in pw_hash or ":" in pw_hash:
+                raise StageError(f"password hash for user {name} must be a single line without ':'")
+            chroot(runner, rootfs, "chpasswd", "--encrypted", input=f"{name}:{pw_hash}\n")
         if "ssh_keys_from" in user:
             keys = rootfs_path(rootfs, f"/home/{name}/.ssh/authorized_keys")
             keys.write_text(secrets[user["ssh_keys_from"]].strip() + "\n", encoding="utf-8")
@@ -95,10 +98,22 @@ def copy_files(profile: Profile, repo_root: Path, rootfs: Path) -> None:
         if src.is_dir():
             for f in sorted(p for p in src.rglob("*") if p.is_file()):
                 rel = f.relative_to(src).as_posix()
-                shutil.copy2(f, rootfs_path(rootfs, f"{dest.rstrip('/')}/{rel}"))
+                _copy_file(f, rootfs_path(rootfs, f"{dest.rstrip('/')}/{rel}"))
         else:
             target = f"{dest}{src.name}" if dest.endswith("/") else dest
-            shutil.copy2(src, rootfs_path(rootfs, target))
+            _copy_file(src, rootfs_path(rootfs, target))
+
+
+def _copy_file(src: Path, target: Path) -> None:
+    shutil.copyfile(src, target)
+    target.chmod(0o644)
+
+
+def fix_home_ownership(profile: Profile, rootfs: Path, runner: Runner) -> None:
+    for user in profile.users:
+        name = user["name"]
+        if (Path(rootfs) / "home" / name).exists():
+            chroot(runner, rootfs, "chown", "-R", f"{name}:{name}", f"/home/{name}")
 
 
 def set_services(profile: Profile, rootfs: Path, runner: Runner) -> None:
@@ -179,6 +194,8 @@ def finalize(rootfs: Path, runner: Runner) -> None:
     chroot(runner, rootfs, "update-initramfs", "-u", "-k", "all")
     chroot(runner, rootfs, "apt-get", "clean")
     chroot(runner, rootfs, "sh", "-c", "rm -rf /var/lib/apt/lists/*")
+    for key in (Path(rootfs) / "etc/ssh").glob("ssh_host_*"):
+        key.unlink()
     rootfs_path(rootfs, "/etc/machine-id").write_text("")
     dbus_id = Path(rootfs) / "var/lib/dbus/machine-id"
     if os.path.lexists(dbus_id):
@@ -230,6 +247,7 @@ def customize(profile: Profile, secrets: Mapping[str, str], src_rootfs: Path, ro
         install_packages(profile, rootfs, runner)
         create_users(profile, secrets, rootfs, runner)
         copy_files(profile, repo_root, rootfs)
+        fix_home_ownership(profile, rootfs, runner)
         set_services(profile, rootfs, runner)
         install_payload(profile, repo_root, rootfs, runner)
         configure_live(profile, rootfs)

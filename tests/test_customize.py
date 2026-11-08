@@ -100,6 +100,7 @@ def test_install_payload_unattended(tmp_path):
     assert "OSP_TARGET_DISK=/dev/sda" in (rootfs / "etc/osp/install.conf").read_text()
     assert (rootfs / "etc/osp/live-packages").read_text().split() == cz.LIVE_PACKAGES
     assert chroot_cmds(r, rootfs) == [["systemctl", "enable", "osp-ready.service"],
+                                      ["systemctl", "enable", "osp-ssh-hostkeys.service"],
                                       ["systemctl", "enable", "osp-installer.service"]]
     if sys.platform != "win32":
         assert os.stat(rootfs / "usr/local/sbin/install-to-disk").st_mode & 0o777 == 0o755
@@ -173,6 +174,40 @@ def test_customize_orchestration_order(tmp_path):
     assert not (rootfs / "usr/sbin/policy-rc.d").exists()
 
 
+def test_copy_files_normalizes_mode(tmp_path):
+    repo, rootfs = tmp_path / "repo", tmp_path / "r"
+    (repo / "files").mkdir(parents=True)
+    f = repo / "files/x"
+    f.write_text("x")
+    os.chmod(f, 0o777)
+    cz.copy_files(make(files=[{"src": "files/x", "dest": "/etc/x"}]), repo, rootfs)
+    if sys.platform != "win32":
+        assert os.stat(rootfs / "etc/x").st_mode & 0o777 == 0o644
+
+
+def test_fix_home_ownership(tmp_path):
+    (tmp_path / "home/admin").mkdir(parents=True)
+    r = RecordingRunner()
+    cz.fix_home_ownership(make(users=[{"name": "admin"}, {"name": "nohome"}]), tmp_path, r)
+    assert chroot_cmds(r, tmp_path) == [["chown", "-R", "admin:admin", "/home/admin"]]
+
+
+def test_finalize_removes_ssh_host_keys(tmp_path):
+    (tmp_path / "etc/ssh").mkdir(parents=True)
+    (tmp_path / "etc/ssh/ssh_host_rsa_key").write_text("k")
+    (tmp_path / "etc/ssh/sshd_config").write_text("c")
+    cz.finalize(tmp_path, RecordingRunner())
+    assert not (tmp_path / "etc/ssh/ssh_host_rsa_key").exists()
+    assert (tmp_path / "etc/ssh/sshd_config").exists()
+
+
+@pytest.mark.parametrize("bad", ["a\nb", "a:b"])
+def test_create_users_rejects_bad_hash(tmp_path, bad):
+    p = make(users=[{"name": "u", "password_hash_from": "env:P"}])
+    with pytest.raises(StageError, match="single line"):
+        cz.create_users(p, {"env:P": bad}, tmp_path, RecordingRunner())
+
+
 @pytest.mark.container
 def test_customize_real_rootfs(tmp_path):
     from osp.backends import debian
@@ -192,6 +227,9 @@ def test_customize_real_rootfs(tmp_path):
     cz.customize(p, {}, base, rootfs, repo, Runner(log_path=tmp_path / "c.log"))
     assert "admin:" in (rootfs / "etc/passwd").read_text()
     assert (rootfs / "etc/motd").read_text() == "hello osp\n"
+    assert os.stat(rootfs / "etc/motd").st_mode & 0o777 == 0o644
+    assert (rootfs / "etc/systemd/system/multi-user.target.wants/osp-ssh-hostkeys.service").is_symlink()
+    assert not list((rootfs / "etc/ssh").glob("ssh_host_*"))
     assert (rootfs / "etc/osp-hook-ran").read_text() == "t\n"
     assert (rootfs / "etc/systemd/system/multi-user.target.wants/osp-ready.service").is_symlink()
     assert (rootfs / "usr/bin/less").exists()

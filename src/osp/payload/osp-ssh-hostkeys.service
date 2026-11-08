@@ -1,0 +1,12 @@
+[Unit]
+Description=os-pipeline: generate SSH host keys on first boot
+ConditionFileIsExecutable=/usr/bin/ssh-keygen
+ConditionPathExists=!/etc/ssh/ssh_host_ed25519_key
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/ssh-keygen -A
+
+[Install]
+WantedBy=multi-user.target
