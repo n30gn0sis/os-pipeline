@@ -1,0 +1,19 @@
+FROM docker.io/library/debian:bookworm-slim
+
+# ubuntu-keyring is not in bookworm main; install it from bookworm-backports.
+RUN echo "deb http://deb.debian.org/debian bookworm-backports main" \
+      > /etc/apt/sources.list.d/backports.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      mmdebstrap debian-archive-keyring ca-certificates gpgv \
+      squashfs-tools xorriso mtools grub-common grub-pc-bin grub-efi-amd64-bin \
+      qemu-system-x86 qemu-utils ovmf \
+      python3 python3-yaml python3-jsonschema python3-pytest \
+      bash util-linux procps \
+ && apt-get install -y --no-install-recommends -t bookworm-backports ubuntu-keyring \
+ && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONPATH=/work/src \
+    OSP_IN_CONTAINER=1 \
+    OSP_STATE_DIR=/var/lib/osp
+WORKDIR /work
