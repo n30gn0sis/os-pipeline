@@ -1,0 +1,152 @@
+#!/bin/bash
+# install-to-disk: install the running os-pipeline live system onto a disk.
+# Usage: install-to-disk --unattended | --tui
+# Config: /etc/osp/install.conf, overridable by kernel cmdline
+#   osp.target= osp.hostname= osp.confirm= osp.keep_test_marker=
+set -euo pipefail
+
+CONF=/etc/osp/install.conf
+SQUASHFS=/run/live/medium/live/filesystem.squashfs
+TARGET_ROOT=/target
+OSP_TARGET_DISK=""
+OSP_HOSTNAME=""
+OSP_CONFIRM=1
+OSP_KEEP_TEST_MARKER=0
+
+log() { echo "osp-install: $*"; }
+die() { echo "osp-install: ERROR: $*" >&2; exit 1; }
+
+part() {  # part DISK N -> partition device
+  if [[ "$1" =~ [0-9]$ ]]; then echo "${1}p$2"; else echo "$1$2"; fi
+}
+
+apply_cmdline() {
+  local word
+  for word in $1; do
+    case "$word" in
+      osp.target=*) OSP_TARGET_DISK="${word#*=}" ;;
+      osp.hostname=*) OSP_HOSTNAME="${word#*=}" ;;
+      osp.confirm=*) OSP_CONFIRM="${word#*=}" ;;
+      osp.keep_test_marker=*) OSP_KEEP_TEST_MARKER="${word#*=}" ;;
+    esac
+  done
+}
+
+load_config() {
+  if [ -f "$CONF" ]; then
+    # shellcheck source=/dev/null
+    . "$CONF"
+  fi
+  apply_cmdline "$(cat /proc/cmdline)"
+}
+
+live_medium_disk() {
+  local src pk
+  src=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+  [ -n "$src" ] || return 0
+  pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1 || true)
+  if [ -n "$pk" ]; then echo "/dev/$pk"; else echo "$src"; fi
+}
+
+choose_tui() {
+  local live items=() name size model
+  live=$(live_medium_disk)
+  while read -r name size model; do
+    [ "$name" = "$live" ] && continue
+    items+=("$name" "$size ${model:-disk}")
+  done < <(lsblk -dnpo NAME,SIZE,MODEL -e 7,11)
+  [ ${#items[@]} -gt 0 ] || die "no installable disks found"
+  OSP_TARGET_DISK=$(whiptail --title "os-pipeline installer" --menu \
+    "Install to which disk? ALL DATA ON IT WILL BE ERASED." 20 70 10 "${items[@]}" 3>&1 1>&2 2>&3) || die "cancelled"
+  OSP_HOSTNAME=$(whiptail --inputbox "Hostname" 8 60 "${OSP_HOSTNAME:-$(hostname)}" 3>&1 1>&2 2>&3) || die "cancelled"
+  whiptail --yesno "Erase $OSP_TARGET_DISK and install?" 8 60 || die "cancelled"
+  OSP_CONFIRM=0
+}
+
+confirm() {
+  [ "$OSP_CONFIRM" = "0" ] && return 0
+  local answer
+  { echo; echo "osp-install will ERASE $OSP_TARGET_DISK. Type YES to continue:"; } > /dev/tty1
+  read -r answer < /dev/tty1
+  [ "$answer" = "YES" ] || die "not confirmed"
+}
+
+partition() {
+  local d=$1
+  sgdisk --zap-all "$d"
+  sgdisk -n1:0:+1M -t1:EF02 -c1:bios -n2:0:+512M -t2:EF00 -c2:esp -n3:0:0 -t3:8300 -c3:root "$d"
+  udevadm settle
+  mkfs.vfat -F32 -n ESP "$(part "$d" 2)"
+  mkfs.ext4 -F -L root "$(part "$d" 3)"
+}
+
+copy_system() {
+  local d=$1 m
+  mkdir -p "$TARGET_ROOT"
+  mount "$(part "$d" 3)" "$TARGET_ROOT"
+  unsquashfs -f -d "$TARGET_ROOT" "$SQUASHFS"
+  mkdir -p "$TARGET_ROOT/boot/efi"
+  mount "$(part "$d" 2)" "$TARGET_ROOT/boot/efi"
+  for m in dev dev/pts proc sys run; do mount --bind "/$m" "$TARGET_ROOT/$m"; done
+}
+
+configure_target() {
+  local d=$1 root_uuid esp_uuid
+  root_uuid=$(blkid -s UUID -o value "$(part "$d" 3)")
+  esp_uuid=$(blkid -s UUID -o value "$(part "$d" 2)")
+  cat > "$TARGET_ROOT/etc/fstab" <<EOF
+UUID=$root_uuid / ext4 errors=remount-ro 0 1
+UUID=$esp_uuid /boot/efi vfat umask=0077 0 1
+EOF
+  if [ -n "$OSP_HOSTNAME" ]; then
+    echo "$OSP_HOSTNAME" > "$TARGET_ROOT/etc/hostname"
+    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$OSP_HOSTNAME/" "$TARGET_ROOT/etc/hosts"
+  fi
+  # shellcheck disable=SC2046
+  chroot "$TARGET_ROOT" env DEBIAN_FRONTEND=noninteractive apt-get -y purge $(cat "$TARGET_ROOT/etc/osp/live-packages")
+  rm -f "$TARGET_ROOT/usr/local/sbin/install-to-disk" \
+        "$TARGET_ROOT"/etc/systemd/system/osp-installer*.service \
+        "$TARGET_ROOT"/etc/systemd/system/multi-user.target.wants/osp-installer*.service
+  if [ "$OSP_KEEP_TEST_MARKER" != "1" ]; then
+    rm -f "$TARGET_ROOT/etc/systemd/system/osp-ready.service" \
+          "$TARGET_ROOT/etc/systemd/system/multi-user.target.wants/osp-ready.service" \
+          "$TARGET_ROOT/usr/local/lib/osp/osp-ready"
+  fi
+  chroot "$TARGET_ROOT" update-initramfs -u -k all
+  chroot "$TARGET_ROOT" grub-install --target=i386-pc "$d"
+  chroot "$TARGET_ROOT" grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram
+  chroot "$TARGET_ROOT" update-grub
+}
+
+cleanup() {
+  local m
+  for m in run sys proc dev/pts dev boot/efi; do umount "$TARGET_ROOT/$m" 2>/dev/null || true; done
+  umount "$TARGET_ROOT" 2>/dev/null || true
+}
+
+main() {
+  local mode=${1:-} live
+  case "$mode" in --unattended|--tui) ;; *) die "usage: install-to-disk --unattended|--tui" ;; esac
+  [ "$(id -u)" = 0 ] || die "must run as root"
+  load_config
+  if [ "$mode" = --tui ]; then choose_tui; fi
+  [ -n "$OSP_TARGET_DISK" ] || die "no target disk configured"
+  [ -b "$OSP_TARGET_DISK" ] || die "target is not a block device: $OSP_TARGET_DISK"
+  live=$(live_medium_disk)
+  [ "$OSP_TARGET_DISK" != "$live" ] || die "refusing to install onto the live medium ($live)"
+  confirm
+  trap cleanup EXIT
+  log "partitioning $OSP_TARGET_DISK"; partition "$OSP_TARGET_DISK"
+  log "copying system"; copy_system "$OSP_TARGET_DISK"
+  log "configuring target"; configure_target "$OSP_TARGET_DISK"
+  cleanup
+  trap - EXIT
+  log "OSP-INSTALL-DONE"
+  if [ "$mode" = --unattended ]; then
+    systemctl poweroff
+  else
+    whiptail --msgbox "Installed. Remove the live medium and reboot." 8 60
+  fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

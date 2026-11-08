@@ -1,0 +1,26 @@
+#!/bin/bash
+# osp-ready: print boot-test markers and check results on the serial console.
+set -u
+out=${OSP_READY_OUT:-/dev/ttyS0}
+checks=${OSP_CHECKS_FILE:-/etc/osp/checks}
+tries=${OSP_CHECK_TRIES:-30}
+pause=${OSP_CHECK_SLEEP:-2}
+[ -w "$out" ] || [ -n "${OSP_READY_OUT:-}" ] || out=/dev/console
+
+{
+  echo "OSP-READY"
+  rc=0
+  if [ -f "$checks" ]; then
+    while IFS= read -r check || [ -n "$check" ]; do
+      [ -z "$check" ] && continue
+      ok=0
+      for ((i = 1; i <= tries; i++)); do
+        if bash -c "$check" >/dev/null 2>&1; then ok=1; break; fi
+        [ "$i" -lt "$tries" ] && sleep "$pause"
+      done
+      if [ "$ok" = 1 ]; then echo "OSP-CHECK-PASS $check"; else echo "OSP-CHECK-FAIL $check"; rc=1; fi
+    done < "$checks"
+  fi
+  echo "OSP-CHECKS-DONE $rc"
+} >> "$out" 2>&1
+exit 0
