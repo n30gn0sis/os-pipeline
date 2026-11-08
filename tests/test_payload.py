@@ -122,3 +122,61 @@ def test_check_target_refuses_partition_and_mounted(tmp_path):
 def test_check_target_fails_closed_without_live_medium(tmp_path):
     assert "cannot determine" in run_check_target(tmp_path).stderr
     assert run_check_target(tmp_path, mode="--tui").returncode == 0
+
+
+def test_unattended_installer_owns_tty1_for_input():
+    unit = PAYLOAD.joinpath("osp-installer.service").read_text()
+    for line in ["StandardInput=tty", "TTYPath=/dev/tty1", "Conflicts=getty@tty1.service",
+                 "StandardOutput=journal+console", "StandardError=journal+console"]:
+        assert line in unit.splitlines(), line
+
+
+def run_confirm(tmp_path, confirm="1", answer="YES\n", active="tty0 ttyS0"):
+    tty, console, act = tmp_path / "tty1", tmp_path / "console", tmp_path / "active"
+    if answer is not None:
+        tty.write_text(answer, newline="\n")
+    act.write_text(active + "\n", newline="\n")
+    script = (f'source "{PAYLOAD.joinpath("install-to-disk")}"; CONFIRM_TTY="{tty}"; CONSOLE="{console}"; '
+              f'CONSOLE_ACTIVE="{act}"; OSP_TARGET_DISK=/dev/vdb; OSP_CONFIRM="{confirm}"; '
+              'confirm; echo confirmed')
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    return r, _text_or_none(tty), _text_or_none(console)
+
+
+def _text_or_none(path):
+    return path.read_text() if path.exists() else None
+
+
+def _fresh(tmp_path, name):
+    d = tmp_path / "".join(c if c.isalnum() else "_" for c in name)
+    d.mkdir()
+    return d
+
+
+@needs_bash
+def test_confirm_prompts_on_tty1_and_serial_console_and_reads_tty1(tmp_path):
+    r, tty, console = run_confirm(tmp_path)
+    assert r.returncode == 0 and "confirmed" in r.stdout
+    assert "ERASE /dev/vdb" in tty and "ERASE /dev/vdb" in console
+
+
+@needs_bash
+def test_confirm_skips_console_when_it_is_tty1(tmp_path):
+    r, tty, console = run_confirm(tmp_path, active="tty1")
+    assert r.returncode == 0 and "ERASE /dev/vdb" in tty and console is None
+
+
+@needs_bash
+def test_confirm_rejects_other_answers(tmp_path):
+    for answer in ["no\n", "yes\n", "", None]:
+        r, _, _ = run_confirm(_fresh(tmp_path, repr(answer)), answer=answer)
+        assert r.returncode != 0 and "not confirmed" in r.stderr, answer
+
+
+@needs_bash
+def test_confirm_zero_skips_prompt_and_other_values_still_prompt(tmp_path):
+    r, tty, console = run_confirm(_fresh(tmp_path, "zero"), confirm="0", answer=None)
+    assert r.returncode == 0 and tty is None and console is None
+    for value in ["false", "no", "00", ""]:
+        r, tty, _ = run_confirm(_fresh(tmp_path, f"v{value}"), confirm=value, answer="nope\n")
+        assert r.returncode != 0 and "ERASE" in tty, value

@@ -8,6 +8,11 @@ set -euo pipefail
 CONF=/etc/osp/install.conf
 SQUASHFS=/run/live/medium/live/filesystem.squashfs
 TARGET_ROOT=/target
+# The confirmation prompt goes to the local monitor (tty1, read from there too) and,
+# when /dev/console is another device (e.g. ttyS0), to the console for serial watchers.
+CONFIRM_TTY=/dev/tty1
+CONSOLE=/dev/console
+CONSOLE_ACTIVE=/sys/class/tty/console/active
 OSP_TARGET_DISK=""
 OSP_HOSTNAME=""
 OSP_CONFIRM=1
@@ -95,11 +100,20 @@ choose_tui() {
   OSP_CONFIRM=0
 }
 
+# console_is_tty1: true when /dev/console writes to tty1. The last active console is
+# /dev/console's device; tty0 is the foreground VT, which is tty1 at boot.
+console_is_tty1() {
+  local active
+  active=$(cat "$CONSOLE_ACTIVE" 2>/dev/null || true)
+  case "${active##* }" in tty0|tty1) return 0 ;; *) return 1 ;; esac
+}
+
 confirm() {
   [ "$OSP_CONFIRM" = "0" ] && return 0
-  local answer
-  { echo; echo "osp-install will ERASE $OSP_TARGET_DISK. Type YES to continue:"; } > /dev/console
-  read -r answer < /dev/console
+  local answer="" prompt="osp-install will ERASE $OSP_TARGET_DISK. Type YES on tty1 to continue:"
+  printf '\n%s\n' "$prompt" >> "$CONFIRM_TTY" || die "cannot write the confirmation prompt to $CONFIRM_TTY"
+  if ! console_is_tty1; then printf '\n%s\n' "$prompt" >> "$CONSOLE" 2>/dev/null || true; fi
+  read -r answer < "$CONFIRM_TTY" || true
   [ "$answer" = "YES" ] || die "not confirmed"
 }
 
