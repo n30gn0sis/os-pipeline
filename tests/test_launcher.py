@@ -53,3 +53,41 @@ def test_container_command_mounts_secret_files_read_only(tmp_path):
     assert f"{secret.resolve()}:/run/osp-secrets/0:ro" in cmd
     env_arg = next(a for a in cmd if a.startswith(f"{FILE_MAP_ENV}="))
     assert json.loads(env_arg.split("=", 1)[1]) == {str(secret): "/run/osp-secrets/0"}
+
+
+class _FakeProc:
+    def __init__(self, rcs):
+        self.rcs = list(rcs)
+
+    def wait(self):
+        rc = self.rcs.pop(0)
+        if isinstance(rc, BaseException):
+            raise rc
+        return rc
+
+
+def _patch_popen(monkeypatch, proc):
+    from osp import launcher
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd: proc)
+    return launcher
+
+
+@pytest.mark.parametrize("rc,expected", [(0, 0), (1, 1), (2, 2), (137, 1), (130, 1)])
+def test_launch_maps_exit_codes(monkeypatch, capsys, rc, expected):
+    launcher = _patch_popen(monkeypatch, _FakeProc([rc]))
+    assert launcher.launch(["docker"]) == expected
+    assert ("container exited with code" in capsys.readouterr().err) == (rc not in (0, 1, 2))
+
+
+def test_launch_125_raises(monkeypatch):
+    launcher = _patch_popen(monkeypatch, _FakeProc([125]))
+    with pytest.raises(LauncherError, match="could not start"):
+        launcher.launch(["docker"])
+
+
+def test_launch_keeps_waiting_on_interrupt_then_reraises(monkeypatch):
+    proc = _FakeProc([KeyboardInterrupt(), 130])
+    launcher = _patch_popen(monkeypatch, proc)
+    with pytest.raises(KeyboardInterrupt):
+        launcher.launch(["docker"])
+    assert proc.rcs == []

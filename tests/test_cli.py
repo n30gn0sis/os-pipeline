@@ -121,6 +121,45 @@ def test_build_in_container_runs_stages_publishes_and_caches(repo, in_container,
     assert in_container[-1] == "assemble" and len(in_container) == 4
 
 
+def test_new_day_reruns_only_assemble(repo, in_container, monkeypatch):
+    import datetime
+
+    assert cli.main(["build", "profiles/p.yaml", "--no-test"]) == 0
+    assert in_container == ["bootstrap", "customize", "assemble"]
+
+    class Tomorrow:
+        @staticmethod
+        def today():
+            return datetime.date.today() + datetime.timedelta(days=1)
+
+    monkeypatch.setattr(cli, "date", Tomorrow)
+    assert cli.main(["build", "profiles/p.yaml", "--no-test"]) == 0
+    assert in_container == ["bootstrap", "customize", "assemble", "assemble"]
+
+
+def test_from_rejects_test_stage():
+    with pytest.raises(SystemExit):
+        cli.build_parser().parse_args(["build", "p.yaml", "--from", "test"])
+
+
+def test_main_interrupt_exit_130(repo, monkeypatch, capsys):
+    def boom(args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "cmd_profile_show", boom)
+    assert cli.main(["profile", "show", "profiles/p.yaml"]) == 130
+    assert "interrupted" in capsys.readouterr().err
+
+
+def test_main_oserror_exit_1(repo, monkeypatch, capsys):
+    def boom(args):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(cli, "cmd_profile_show", boom)
+    assert cli.main(["profile", "show", "profiles/p.yaml"]) == 1
+    assert "denied" in capsys.readouterr().err
+
+
 def test_stage_failure_prints_log_tail(repo, in_container, monkeypatch, capsys, tmp_path):
     log = tmp_path / "c.log"
     log.write_text("".join(f"line {i}\n" for i in range(50)))

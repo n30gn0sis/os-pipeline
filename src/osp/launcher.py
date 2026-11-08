@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -58,11 +59,19 @@ def container_command(
 
 
 def launch(cmd: list[str]) -> int:
-    rc = subprocess.call(cmd)
+    proc = subprocess.Popen(cmd)
+    try:
+        rc = proc.wait()
+    except KeyboardInterrupt:
+        proc.wait()  # let the engine forward the signal and remove the container
+        raise
     if rc == 125:  # docker/podman: the container itself failed to start
         raise LauncherError(
             "could not start the builder container. Build the image with:\n"
             "  docker build -t osp-builder:latest -f builder/Containerfile builder\n"
             "and make sure privileged containers are allowed."
         )
+    if rc not in (0, 1, 2):
+        print(f"osp: container exited with code {rc}", file=sys.stderr)
+        return 1
     return rc

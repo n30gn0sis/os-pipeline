@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     b = sub.add_parser("build", help="build an image from a profile")
     b.add_argument("profile")
-    b.add_argument("--from", dest="from_stage", choices=STAGES, help="rerun from this stage, ignoring its cache")
+    b.add_argument("--from", dest="from_stage", choices=STAGES[:3], help="rerun from this stage, ignoring its cache")
     b.add_argument("--no-test", action="store_true", help="skip the QEMU boot tests")
     b.add_argument("--keep-failed", action=argparse.BooleanOptionalAction, default=True,
                    help="keep a failed stage's work directory for inspection (default: on)")
@@ -142,7 +142,7 @@ def _build_in_container(args, repo: Path) -> int:
     force = stages_to_force(args.from_stage)
     backend = get_backend(profile.family)
     bkey = backend.bootstrap_key(profile)
-    work = state / "work" / stem
+    work = state / "work" / profile.name
 
     def stage(name, key, out_dir, fn):
         log = logs / f"{name}.log"
@@ -153,7 +153,7 @@ def _build_in_container(args, repo: Path) -> int:
                      lambda d, r: backend.bootstrap(profile, d / "rootfs", r))
     cust_dir = stage("customize", f"{build_hash}:{bkey}", work / "customize",
                      lambda d, r: customize(profile, secrets, boot_dir / "rootfs", d / "rootfs", repo, r))
-    asm_dir = stage("assemble", build_hash, work / "assemble",
+    asm_dir = stage("assemble", f"{build_hash}:{bkey}:{stem}", work / "assemble",
                     lambda d, r: assemble(profile, cust_dir / "rootfs", d, stem, build_hash, r))
     iso = publish(asm_dir, out, stem)
     print(f"built {iso}")
@@ -234,3 +234,9 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as e:  # e.g. safe_rmtree refusing to delete a mounted tree
         print(f"osp: {e}", file=sys.stderr)
         return 1
+    except OSError as e:
+        print(f"osp: {e}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("osp: interrupted", file=sys.stderr)
+        return 130
