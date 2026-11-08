@@ -1,5 +1,9 @@
+import shutil
+import subprocess
+import sys
 from importlib import resources
 
+import pytest
 import yaml
 
 CAL = resources.files("osp").joinpath("payload", "calamares")
@@ -45,3 +49,30 @@ def test_removelive_drops_osp_live_files():
 def test_autostart_is_gated_on_cmdline():
     desktop = resources.files("osp").joinpath("payload", "osp-calamares.desktop").read_text(encoding="utf-8")
     assert "osp.install=calamares" in desktop and "pkexec calamares" in desktop
+
+
+GETTY_DROPIN_DIR = "/etc/systemd/system/getty@tty1.service.d"
+needs_sh = pytest.mark.skipif(sys.platform == "win32" or not shutil.which("sh"), reason="needs a POSIX sh")
+
+
+def getty_commands() -> list[str]:
+    return [c for c in load("modules", "shellprocess_removelive.conf")["script"] if GETTY_DROPIN_DIR in c]
+
+
+def test_removelive_drops_tty1_autologin():
+    assert f"rm -f {GETTY_DROPIN_DIR}/autologin.conf" in getty_commands()
+
+
+@needs_sh
+@pytest.mark.parametrize("contents, dir_kept", [(["autologin.conf"], False), (["autologin.conf", "x.conf"], True),
+                                                (None, False)])
+def test_removelive_tty1_autologin_commands_run(tmp_path, contents, dir_kept):
+    dropin = tmp_path / "getty@tty1.service.d"
+    if contents is not None:
+        dropin.mkdir()
+        for name in contents:
+            (dropin / name).write_text("[Service]\n")
+    for cmd in getty_commands():
+        subprocess.run(["sh", "-c", cmd.replace(GETTY_DROPIN_DIR, str(dropin))], check=True)
+    assert not (dropin / "autologin.conf").exists()
+    assert dropin.is_dir() == dir_kept

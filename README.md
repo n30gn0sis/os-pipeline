@@ -31,7 +31,7 @@ Profiles live in `profiles/` and combine layers with `extends:`. Secrets (SSH ke
 
 ## Behaviour worth knowing
 
-- Installed systems keep whatever `live.autologin` the profile set; the installer does not turn autologin off. The profile decides.
+- Calamares installs remove both the display-manager (lightdm) and the tty1 autologin. TUI and unattended installs keep whatever `live.autologin` the profile set; there the profile decides.
 - Calamares installs carry the live/profile users onto the installed system. They have no password unless the profile sets `password_hash`.
 - Run one build per profile at a time. The work directory is one slot per profile name (`state/work/<profile.name>` in the state volume) and there is no lock.
 - `files[]` entries are installed with mode 0644 (directories 0755). Use a `hooks.customize` script to set executable bits or other modes.
