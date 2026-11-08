@@ -63,7 +63,7 @@ class Runner:
             if log:
                 log.close()
         if check and rc != 0:
-            raise CommandError(cmd, rc, self.log_path)
+            raise CommandError([self.redact(c) for c in cmd], rc, self.log_path)
         return subprocess.CompletedProcess(cmd, rc, "".join(lines), "")
 
 

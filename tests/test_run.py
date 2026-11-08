@@ -66,3 +66,11 @@ def test_recording_runner_records_and_fakes_results():
     with pytest.raises(CommandError):
         r.run(["false"])
     assert r.run(["false"], check=False).returncode == 1
+
+
+def test_command_error_redacts_secrets():
+    with pytest.raises(CommandError) as ei:
+        Runner(secrets=["s3cret"]).run([PY, "-c", "import sys; sys.exit(1)", "s3cret"])
+    assert "s3cret" not in str(ei.value)
+    assert all("s3cret" not in c for c in ei.value.cmd)
+    assert "***" in str(ei.value)
