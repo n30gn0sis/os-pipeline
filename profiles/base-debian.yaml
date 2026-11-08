@@ -1,0 +1,4 @@
+schema_version: 1
+name: base-debian
+extends: [base-common]
+distro: {family: debian, flavor: debian, release: bookworm, arch: amd64}

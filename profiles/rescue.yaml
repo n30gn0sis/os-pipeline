@@ -1,0 +1,17 @@
+schema_version: 1
+name: rescue
+extends: [base-debian]
+packages: [testdisk, gddrescue, gdisk, parted, smartmontools, nvme-cli, lvm2, mdadm, cryptsetup,
+           ntfs-3g, dosfstools, e2fsprogs, btrfs-progs, xfsprogs, rsync, tmux, htop, ethtool, tcpdump, mtr-tiny]
+users:
+  - name: rescue
+    groups: [sudo]
+hooks:
+  customize: [hooks/rescue/sudoers.sh]
+live:
+  autologin: true
+installer:
+  mode: tui
+  config: installer/rescue.yaml
+test:
+  checks: ["command -v testdisk", "sudo -n -u rescue sudo -n true"]

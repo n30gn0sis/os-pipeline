@@ -1,0 +1,4 @@
+schema_version: 1
+name: base-ubuntu
+extends: [base-common]
+distro: {family: debian, flavor: ubuntu, release: noble, arch: amd64}
