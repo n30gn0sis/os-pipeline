@@ -27,13 +27,18 @@ def in_container(environ: Mapping[str, str] = os.environ) -> bool:
 def _windows_console(fd: int) -> bool:
     import ctypes
     import msvcrt
+    from ctypes import wintypes
 
     try:
         handle = msvcrt.get_osfhandle(fd)
-    except OSError:
+        # A private kernel32 instance, so declaring prototypes cannot affect other ctypes users.
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetConsoleMode.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        mode = wintypes.DWORD()
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+    except (OSError, ctypes.ArgumentError):
         return False
-    mode = ctypes.c_uint32()
-    return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
 
 
 def stdin_is_terminal(stdin=None, is_console: Callable[[int], bool] | None = None) -> bool:

@@ -119,3 +119,14 @@ def test_stdin_is_terminal_requires_a_console_when_checked():
 def test_stdin_is_terminal_false_for_devnull():
     with open(os.devnull) as null:
         assert stdin_is_terminal(null) is False
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows console detection")
+def test_windows_console_false_for_nul_and_invalid_fds():
+    from osp.launcher import _windows_console
+
+    with open(os.devnull) as null:
+        assert _windows_console(null.fileno()) is False
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.close(fd)
+    assert _windows_console(fd) is False
