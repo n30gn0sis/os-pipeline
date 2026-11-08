@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "os-pipeline"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6", "jsonschema>=4.10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+osp = "osp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+osp = ["schema/*.json", "payload/**/*", "payload/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]
+markers = [
+  "container: needs the privileged osp-builder container",
+  "boot: boots an ISO in QEMU (slow)",
+]
+addopts = "-m 'not container and not boot'"
