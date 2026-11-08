@@ -15,6 +15,12 @@ def test_qemu_command_bios_cdrom_tcg():
     assert not any("pflash" in a for a in cmd)
 
 
+def test_qemu_command_uses_virtio_gpu():
+    # wlroots 0.16 (cage on bookworm) needs DRM PRIME import, which bochs-drm (-vga std) lacks.
+    cmd = qemu_command(firmware="bios", kvm=False, cdrom=Path("/i.iso"))
+    assert ["-vga", "virtio"] == cmd[cmd.index("-vga"):cmd.index("-vga") + 2]
+
+
 def test_qemu_command_attaches_cdrom_via_ahci():
     # OVMF + direct kernel boot never finds a CD-ROM on the legacy PIIX IDE bus; AHCI works
     # for both firmwares and both boot paths.

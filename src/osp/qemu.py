@@ -85,7 +85,7 @@ def kvm_available() -> bool:
 def qemu_command(*, firmware: str, kvm: bool, vars_path: Path | None = None, cdrom: Path | None = None,
                  disk: Path | None = None, kernel: Path | None = None, initrd: Path | None = None,
                  append: str | None = None) -> list[str]:
-    cmd = ["qemu-system-x86_64", "-m", "2048", "-smp", "2", "-display", "none", "-vga", "std",
+    cmd = ["qemu-system-x86_64", "-m", "2048", "-smp", "2", "-display", "none", "-vga", "virtio",
            "-serial", "stdio", "-monitor", "none", "-no-reboot"]
     cmd += ["-enable-kvm", "-cpu", "host"] if kvm else ["-cpu", "max"]
     if firmware == "uefi":
