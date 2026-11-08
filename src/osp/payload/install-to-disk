@@ -22,7 +22,9 @@ part() {  # part DISK N -> partition device
 
 apply_cmdline() {
   local word
-  for word in $1; do
+  local -a words
+  read -ra words <<<"$1"
+  for word in ${words[@]+"${words[@]}"}; do
     case "$word" in
       osp.target=*) OSP_TARGET_DISK="${word#*=}" ;;
       osp.hostname=*) OSP_HOSTNAME="${word#*=}" ;;
@@ -40,12 +42,41 @@ load_config() {
   apply_cmdline "$(cat /proc/cmdline)"
 }
 
+live_medium_source() {
+  findmnt -no SOURCE /run/live/medium 2>/dev/null || true
+}
+
 live_medium_disk() {
-  local src pk
-  src=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+  local src pk disk
+  src=$(live_medium_source)
   [ -n "$src" ] || return 0
   pk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -n1 || true)
-  if [ -n "$pk" ]; then echo "/dev/$pk"; else echo "$src"; fi
+  if [ -n "$pk" ]; then disk="/dev/$pk"; else disk="$src"; fi
+  readlink -f "$disk" || echo "$disk"
+}
+
+valid_hostname() {
+  [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+}
+
+# check_target MODE: canonicalise OSP_TARGET_DISK and refuse unsafe targets.
+check_target() {
+  local mode=$1 live src name
+  OSP_TARGET_DISK=$(readlink -f "$OSP_TARGET_DISK") || die "cannot resolve target"
+  [ "$(lsblk -dno TYPE "$OSP_TARGET_DISK" 2>/dev/null | head -n1)" = disk ] || die "target must be a whole disk"
+  live=$(live_medium_disk)
+  if [ -z "$live" ]; then
+    [ "$mode" = --tui ] || die "cannot determine the live medium; refusing unattended install"
+  else
+    [ "$OSP_TARGET_DISK" != "$live" ] || die "refusing to install onto the live medium ($live)"
+    src=$(live_medium_source)
+    while read -r name; do
+      if [ "$name" = "$(basename "$OSP_TARGET_DISK")" ]; then die "refusing to install onto the live medium ($name)"; fi
+    done < <(lsblk -nrso NAME "$src" 2>/dev/null || true)
+  fi
+  if lsblk -nro MOUNTPOINT "$OSP_TARGET_DISK" 2>/dev/null | grep -q .; then
+    die "target has mounted partitions: $OSP_TARGET_DISK"
+  fi
 }
 
 choose_tui() {
@@ -59,6 +90,7 @@ choose_tui() {
   OSP_TARGET_DISK=$(whiptail --title "os-pipeline installer" --menu \
     "Install to which disk? ALL DATA ON IT WILL BE ERASED." 20 70 10 "${items[@]}" 3>&1 1>&2 2>&3) || die "cancelled"
   OSP_HOSTNAME=$(whiptail --inputbox "Hostname" 8 60 "${OSP_HOSTNAME:-$(hostname)}" 3>&1 1>&2 2>&3) || die "cancelled"
+  valid_hostname "$OSP_HOSTNAME" || die "invalid hostname: $OSP_HOSTNAME"
   whiptail --yesno "Erase $OSP_TARGET_DISK and install?" 8 60 || die "cancelled"
   OSP_CONFIRM=0
 }
@@ -66,8 +98,8 @@ choose_tui() {
 confirm() {
   [ "$OSP_CONFIRM" = "0" ] && return 0
   local answer
-  { echo; echo "osp-install will ERASE $OSP_TARGET_DISK. Type YES to continue:"; } > /dev/tty1
-  read -r answer < /dev/tty1
+  { echo; echo "osp-install will ERASE $OSP_TARGET_DISK. Type YES to continue:"; } > /dev/console
+  read -r answer < /dev/console
   [ "$answer" = "YES" ] || die "not confirmed"
 }
 
@@ -94,6 +126,7 @@ configure_target() {
   local d=$1 root_uuid esp_uuid
   root_uuid=$(blkid -s UUID -o value "$(part "$d" 3)")
   esp_uuid=$(blkid -s UUID -o value "$(part "$d" 2)")
+  [ -n "$root_uuid" ] && [ -n "$esp_uuid" ] || die "could not read partition UUIDs"
   cat > "$TARGET_ROOT/etc/fstab" <<EOF
 UUID=$root_uuid / ext4 errors=remount-ro 0 1
 UUID=$esp_uuid /boot/efi vfat umask=0077 0 1
@@ -102,6 +135,7 @@ EOF
     echo "$OSP_HOSTNAME" > "$TARGET_ROOT/etc/hostname"
     sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t$OSP_HOSTNAME/" "$TARGET_ROOT/etc/hosts"
   fi
+  [ -f "$TARGET_ROOT/etc/osp/live-packages" ] || die "missing $TARGET_ROOT/etc/osp/live-packages"
   # shellcheck disable=SC2046
   chroot "$TARGET_ROOT" env DEBIAN_FRONTEND=noninteractive apt-get -y purge $(cat "$TARGET_ROOT/etc/osp/live-packages")
   rm -f "$TARGET_ROOT/usr/local/sbin/install-to-disk" \
@@ -125,15 +159,15 @@ cleanup() {
 }
 
 main() {
-  local mode=${1:-} live
+  local mode=${1:-}
   case "$mode" in --unattended|--tui) ;; *) die "usage: install-to-disk --unattended|--tui" ;; esac
   [ "$(id -u)" = 0 ] || die "must run as root"
   load_config
   if [ "$mode" = --tui ]; then choose_tui; fi
   [ -n "$OSP_TARGET_DISK" ] || die "no target disk configured"
-  [ -b "$OSP_TARGET_DISK" ] || die "target is not a block device: $OSP_TARGET_DISK"
-  live=$(live_medium_disk)
-  [ "$OSP_TARGET_DISK" != "$live" ] || die "refusing to install onto the live medium ($live)"
+  [ -b "$(readlink -f "$OSP_TARGET_DISK")" ] || die "target is not a block device: $OSP_TARGET_DISK"
+  [ -z "$OSP_HOSTNAME" ] || valid_hostname "$OSP_HOSTNAME" || die "invalid hostname: $OSP_HOSTNAME"
+  check_target "$mode"
   confirm
   trap cleanup EXIT
   log "partitioning $OSP_TARGET_DISK"; partition "$OSP_TARGET_DISK"

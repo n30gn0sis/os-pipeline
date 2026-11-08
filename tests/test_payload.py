@@ -65,3 +65,60 @@ def test_osp_ready_reports_checks(tmp_path):
     subprocess.run(["bash", str(PAYLOAD.joinpath("osp-ready"))], check=True, env=env)
     assert out.read_text().splitlines() == [
         "OSP-READY", "OSP-CHECK-PASS true", "OSP-CHECK-FAIL false", "OSP-CHECKS-DONE 1"]
+
+
+@needs_bash
+def test_osp_ready_checks_do_not_consume_checks_file(tmp_path):
+    checks = tmp_path / "checks"
+    checks.write_text("cat >/dev/null\nfalse\n")
+    out = tmp_path / "serial"
+    env = {**os.environ, "OSP_READY_OUT": str(out), "OSP_CHECKS_FILE": str(checks),
+           "OSP_CHECK_TRIES": "1", "OSP_CHECK_SLEEP": "0"}
+    subprocess.run(["bash", str(PAYLOAD.joinpath("osp-ready"))], check=True, env=env)
+    assert out.read_text().splitlines() == [
+        "OSP-READY", "OSP-CHECK-PASS cat >/dev/null", "OSP-CHECK-FAIL false", "OSP-CHECKS-DONE 1"]
+
+
+def run_check_target(tmp_path, mode="--unattended", target="/dev/vdb", **stub):
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "lsblk").write_text(
+        '#!/bin/bash\n'
+        'case "$*" in\n'
+        '  "-dno TYPE "*) echo "${STUB_TYPE-disk}" ;;\n'
+        '  "-no PKNAME "*) echo "${STUB_PK-}" ;;\n'
+        '  "-nrso NAME "*) printf "%s\n" ${STUB_ANC-} ;;\n'
+        '  "-nro MOUNTPOINT "*) echo "${STUB_MNT-}" ;;\n'
+        'esac\n', newline="\n")
+    (bindir / "findmnt").write_text('#!/bin/bash\necho "${STUB_SRC-}"\n', newline="\n")
+    for f in bindir.iterdir():
+        f.chmod(0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           **{f"STUB_{k.upper()}": v for k, v in stub.items()}}
+    script = (f'source "{PAYLOAD.joinpath("install-to-disk")}"; OSP_TARGET_DISK={target}; '
+              f'check_target {mode}; echo "ok $OSP_TARGET_DISK"')
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=env)
+
+
+@needs_bash
+def test_check_target_accepts_other_disk(tmp_path):
+    r = run_check_target(tmp_path, src="/dev/sda1", pk="sda", anc="sda1 sda")
+    assert r.returncode == 0 and "ok /dev/vdb" in r.stdout
+
+
+@needs_bash
+def test_check_target_refuses_live_disk_and_ancestors(tmp_path):
+    assert "live medium" in run_check_target(tmp_path, target="/dev/sda", src="/dev/sda1", pk="sda", anc="sda1 sda").stderr
+    assert "live medium" in run_check_target(tmp_path, src="/dev/mapper/x", pk="", anc="x vdb").stderr
+
+
+@needs_bash
+def test_check_target_refuses_partition_and_mounted(tmp_path):
+    assert "whole disk" in run_check_target(tmp_path, type="part", src="/dev/sda1", pk="sda").stderr
+    assert "mounted" in run_check_target(tmp_path, src="/dev/sda1", pk="sda", mnt="/mnt").stderr
+
+
+@needs_bash
+def test_check_target_fails_closed_without_live_medium(tmp_path):
+    assert "cannot determine" in run_check_target(tmp_path).stderr
+    assert run_check_target(tmp_path, mode="--tui").returncode == 0
