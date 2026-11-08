@@ -177,6 +177,8 @@ main() {
   case "$mode" in --unattended|--tui) ;; *) die "usage: install-to-disk --unattended|--tui" ;; esac
   [ "$(id -u)" = 0 ] || die "must run as root"
   load_config
+  # Without the ISO's squashfs (e.g. booted with toram) there is nothing to copy; stop before any disk is touched.
+  [ -f "$SQUASHFS" ] || die "live system image not found: $SQUASHFS"
   if [ "$mode" = --tui ]; then choose_tui; fi
   [ -n "$OSP_TARGET_DISK" ] || die "no target disk configured"
   [ -b "$(readlink -f "$OSP_TARGET_DISK")" ] || die "target is not a block device: $OSP_TARGET_DISK"

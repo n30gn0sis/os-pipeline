@@ -5,6 +5,7 @@ import argparse
 import os
 import shutil
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -97,7 +98,7 @@ def publish(assemble_dir: Path, out_dir: Path, stem: str) -> Path:
 
 
 def _run_tests(iso: Path, install: bool, firmwares: list[str], workdir: Path, log_dir: Path,
-               runner: Runner, timeout: int) -> int:
+               runner: Runner, timeout: int, expected_checks: int | None = None) -> int:
     if not kvm_available():
         print("warning: /dev/kvm is not available; QEMU falls back to software emulation "
               "and boot tests will be slow", file=sys.stderr)
@@ -107,9 +108,12 @@ def _run_tests(iso: Path, install: bool, firmwares: list[str], workdir: Path, lo
             res = install_test(iso, fw, workdir / fw, log_dir, runner, timeout=timeout)
         else:
             res = boot_test(iso, fw, workdir / fw, log_dir / f"boot-{fw}.log", timeout=timeout)
+        if res.ok and expected_checks is not None and len(res.passed) != expected_checks:
+            res = replace(res, ok=False, reason=f"expected {expected_checks} passed check(s), "
+                                                f"saw {len(res.passed)}")
         label = f"{fw} install" if install else fw
         print(f"[test {label}] {'PASS' if res.ok else 'FAIL'}: {res.reason} "
-              f"(passed {len(res.passed)}, failed {res.failed}) log: {res.log_path}")
+              f"(passed {len(res.passed)}, failed {len(res.failed)}) log: {res.log_path}")
         failed = failed or not res.ok
     return 1 if failed else 0
 
@@ -161,7 +165,7 @@ def _build_in_container(args, repo: Path) -> int:
     if args.no_test:
         return 0
     return _run_tests(iso, False, list(FIRMWARES), state / "test" / stem, logs,
-                      base.with_log(logs / "test.log"), args.timeout)
+                      base.with_log(logs / "test.log"), args.timeout, expected_checks=len(profile.checks))
 
 
 def cmd_test(args) -> int:

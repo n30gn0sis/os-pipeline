@@ -32,8 +32,9 @@ Profiles live in `profiles/` and combine layers with `extends:`. Secrets (SSH ke
 ## Behaviour worth knowing
 
 - Calamares installs remove both the display-manager (lightdm) and the tty1 autologin. TUI and unattended installs keep whatever `live.autologin` the profile set; there the profile decides.
-- Calamares installs carry the live/profile users onto the installed system. They have no password unless the profile sets `password_hash`.
-- Run one build per profile at a time. The work directory is one slot per profile name (`state/work/<profile.name>` in the state volume) and there is no lock.
+- Calamares installs carry the live/profile users onto the installed system. They have no password unless the profile sets `password_hash_from`.
+- Run one build at a time. The work directory is one slot per profile name (`state/work/<profile.name>` in the state volume), the bootstrap cache is shared across profiles with the same bootstrap key, and an in-progress cache directory with a matching key is deleted by the next build. There is no lock.
+- On a Linux Docker host, files under `output/` are created by root inside the container. `sudo chown` them afterwards, or run Docker with a user namespace.
 - `files[]` entries are installed with mode 0644 (directories 0755). Use a `hooks.customize` script to set executable bits or other modes.
 - `installer/homelab.yaml` is an example. Its `target_disk: /dev/sda` must match the real disk (`/dev/vda` on virtio VMs), and `confirm: true` asks for a typed YES on tty1 (the local monitor and keyboard; the prompt is also echoed to the serial console, but the answer is read only from tty1). A serial-only install (no tty1) must use `confirm: false`. `osp test --install` supplies its own config (target = the test disk, `confirm: false`) via the kernel command line and does not use the profile's.
 - Bootstrap caches are keyed by flavor, release, arch, apt sources, the bootstrap package list and the backend's own source (`src/osp/backends/debian.py`). After a change to any of those the old cache is orphaned until `osp clean --cache`.

@@ -184,3 +184,31 @@ def test_clean_in_container(repo, monkeypatch, tmp_path):
     assert (state / "cache").exists() and not (state / "work").exists() and not (state / "test").exists()
     assert cli.main(["clean"]) == 0
     assert not (state / "cache").exists()
+
+
+def test_run_tests_fails_when_fewer_checks_pass_than_expected(monkeypatch, tmp_path, capsys):
+    from osp.qemu import BootResult
+
+    monkeypatch.setattr(cli, "kvm_available", lambda: True)
+    monkeypatch.setattr(cli, "boot_test", lambda iso, fw, workdir, log, timeout: BootResult(
+        True, "all checks passed", ["true"], [], log))
+    assert cli._run_tests(tmp_path / "x.iso", False, ["bios"], tmp_path / "w", tmp_path / "l",
+                          None, 300, expected_checks=2) == 1
+    out = capsys.readouterr().out
+    assert "FAIL" in out and "expected 2" in out and "saw 1" in out
+    assert "failed 0)" in out and "failed []" not in out
+    assert cli._run_tests(tmp_path / "x.iso", False, ["bios"], tmp_path / "w", tmp_path / "l",
+                          None, 300, expected_checks=1) == 0
+    assert "PASS" in capsys.readouterr().out
+
+
+def test_build_test_expects_the_profile_checks(repo, in_container, monkeypatch, capsys):
+    from osp.qemu import BootResult
+
+    write_yaml(repo / "profiles" / "p.yaml", profile_data(
+        name="p", users=[{"name": "a", "ssh_keys_from": "env:OSP_K"}], test={"checks": ["true", "id a"]}))
+    monkeypatch.setattr(cli, "kvm_available", lambda: True)
+    monkeypatch.setattr(cli, "boot_test", lambda iso, fw, workdir, log, timeout: BootResult(
+        True, "all checks passed", ["true"], [], log))
+    assert cli.main(["build", "profiles/p.yaml"]) == 1
+    assert "expected 2" in capsys.readouterr().out

@@ -180,3 +180,20 @@ def test_confirm_zero_skips_prompt_and_other_values_still_prompt(tmp_path):
     for value in ["false", "no", "00", ""]:
         r, tty, _ = run_confirm(_fresh(tmp_path, f"v{value}"), confirm=value, answer="nope\n")
         assert r.returncode != 0 and "ERASE" in tty, value
+
+
+def run_main_with_squashfs(tmp_path, exists: bool):
+    squashfs = tmp_path / "filesystem.squashfs"
+    if exists:
+        squashfs.write_bytes(b"hsqs")
+    script = (f'source "{PAYLOAD.joinpath("install-to-disk")}"; id() {{ echo 0; }}; load_config() {{ :; }}; '
+              f'confirm() {{ echo CONFIRM-REACHED; }}; SQUASHFS="{squashfs}"; main --unattended')
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+@needs_bash
+def test_main_refuses_without_live_squashfs(tmp_path):
+    r = run_main_with_squashfs(tmp_path, exists=False)
+    assert r.returncode != 0 and "filesystem.squashfs" in r.stderr and "CONFIRM-REACHED" not in r.stdout
+    r = run_main_with_squashfs(tmp_path, exists=True)
+    assert r.returncode != 0 and "no target disk configured" in r.stderr

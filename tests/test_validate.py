@@ -109,3 +109,8 @@ def test_explicit_null_sections_rejected(tmp_path):
     with pytest.raises(ProfileError) as ei:
         load_profile(p, tmp_path)
     assert "services" in str(ei.value)
+
+
+def test_name_is_at_most_63_characters(tmp_path):
+    assert validate(profile_data(name="a" * 63), tmp_path) == []
+    assert "name" in errs(profile_data(name="a" * 64), tmp_path)
