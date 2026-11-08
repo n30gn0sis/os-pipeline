@@ -24,6 +24,34 @@ def in_container(environ: Mapping[str, str] = os.environ) -> bool:
     return environ.get(IN_CONTAINER_ENV) == "1"
 
 
+def _windows_console(fd: int) -> bool:
+    import ctypes
+    import msvcrt
+
+    try:
+        handle = msvcrt.get_osfhandle(fd)
+    except OSError:
+        return False
+    mode = ctypes.c_uint32()
+    return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+
+
+def stdin_is_terminal(stdin=None, is_console: Callable[[int], bool] | None = None) -> bool:
+    """True only for an interactive terminal. On Windows, isatty() is also True for NUL,
+    which makes `docker run -it` fail, so the handle must also be a real console."""
+    stdin = sys.stdin if stdin is None else stdin
+    try:
+        if stdin is None or not stdin.isatty():
+            return False
+        if is_console is None:
+            if os.name != "nt":
+                return True
+            is_console = _windows_console
+        return is_console(stdin.fileno())
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 def find_engine(which: Callable[[str], str | None] = shutil.which) -> str:
     for engine in ("docker", "podman"):
         if which(engine):

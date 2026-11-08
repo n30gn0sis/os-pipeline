@@ -14,7 +14,8 @@ from osp.assemble import assemble
 from osp.backends import get_backend
 from osp.buildid import artifact_stem, compute_build_hash
 from osp.customize import customize
-from osp.launcher import LauncherError, container_command, find_engine, in_container, launch
+from osp.launcher import (LauncherError, container_command, find_engine, in_container, launch,
+                          stdin_is_terminal)
 from osp.mounts import safe_rmtree
 from osp.profile import ProfileError
 from osp.qemu import boot_test, install_test, kvm_available
@@ -85,7 +86,7 @@ def _repo_relative(path: str, repo: Path) -> str:
 
 
 def _launch(repo: Path, osp_args: list[str], envs: list[str], files: list[str]) -> int:
-    return launch(container_command(find_engine(), repo, osp_args, envs, files, tty=sys.stdin.isatty()))
+    return launch(container_command(find_engine(), repo, osp_args, envs, files, tty=stdin_is_terminal()))
 
 
 def publish(assemble_dir: Path, out_dir: Path, stem: str) -> Path:

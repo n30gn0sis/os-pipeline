@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from osp.launcher import (
     container_command,
     find_engine,
     in_container,
+    stdin_is_terminal,
 )
 
 
@@ -91,3 +93,29 @@ def test_launch_keeps_waiting_on_interrupt_then_reraises(monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         launcher.launch(["docker"])
     assert proc.rcs == []
+
+
+class _Stream:
+    def __init__(self, tty: bool):
+        self._tty = tty
+
+    def isatty(self):
+        return self._tty
+
+    def fileno(self):
+        return 0
+
+
+def test_stdin_is_terminal_false_for_non_tty():
+    assert stdin_is_terminal(_Stream(False), is_console=lambda fd: True) is False
+
+
+def test_stdin_is_terminal_requires_a_console_when_checked():
+    # On Windows, NUL is a character device: isatty() is True but it is not a console.
+    assert stdin_is_terminal(_Stream(True), is_console=lambda fd: False) is False
+    assert stdin_is_terminal(_Stream(True), is_console=lambda fd: True) is True
+
+
+def test_stdin_is_terminal_false_for_devnull():
+    with open(os.devnull) as null:
+        assert stdin_is_terminal(null) is False
