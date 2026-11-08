@@ -1,6 +1,10 @@
 import hashlib
+import shutil
 from datetime import date
+from importlib import resources
 from pathlib import Path
+
+import pytest
 
 from helpers import profile_data
 from osp.buildid import artifact_stem, compute_build_hash, referenced_paths
@@ -79,6 +83,46 @@ def test_payload_tree_is_hashed(tmp_path, monkeypatch):
     before = compute_build_hash(p, tmp_path, {})
     (payload_root / "payload" / "x").write_text("two")
     assert compute_build_hash(p, tmp_path, {}) != before
+
+
+@pytest.fixture
+def package_copy(tmp_path, monkeypatch):
+    """A copy of the osp package that compute_build_hash walks instead of the real one."""
+    import osp.buildid as buildid
+
+    root = tmp_path / "pkgcopy"
+    shutil.copytree(str(resources.files("osp")), root, ignore=shutil.ignore_patterns("__pycache__"))
+    monkeypatch.setattr(buildid.resources, "files", lambda _pkg: root)
+    return root
+
+
+def flip_last_byte(path: Path) -> None:
+    data = bytearray(path.read_bytes())
+    data[-1] ^= 1
+    path.write_bytes(bytes(data))
+
+
+def test_hash_stable_over_unchanged_package(tmp_path, package_copy):
+    p = make(tmp_path)
+    assert compute_build_hash(p, tmp_path, {}) == compute_build_hash(p, tmp_path, {})
+
+
+@pytest.mark.parametrize("rel", ["cli.py", "backends/debian.py", "schema/profile.schema.json",
+                                 "payload/install-to-disk"])
+def test_hash_changes_with_package_source(tmp_path, package_copy, rel):
+    p = make(tmp_path)
+    before = compute_build_hash(p, tmp_path, {})
+    flip_last_byte(package_copy / rel)
+    assert compute_build_hash(p, tmp_path, {}) != before
+
+
+def test_hash_ignores_pycache(tmp_path, package_copy):
+    p = make(tmp_path)
+    before = compute_build_hash(p, tmp_path, {})
+    for d in (package_copy / "__pycache__", package_copy / "payload" / "__pycache__"):
+        d.mkdir()
+        (d / "cli.cpython-311.pyc").write_bytes(b"junk")
+    assert compute_build_hash(p, tmp_path, {}) == before
 
 
 def test_artifact_stem(tmp_path):

@@ -16,7 +16,7 @@ Run everything from the repository root. The commands below work in PowerShell (
 ## Architecture
 
 - `osp` on the host only validates profiles and re-launches itself in the privileged `osp-builder` container (`src/osp/launcher.py`). Inside the container, `OSP_IN_CONTAINER=1` and `OSP_STATE_DIR=/var/lib/osp` (a named volume, because a Windows bind mount can't hold a rootfs). Only `output/` (artifacts + logs) is written to the repo.
-- A build is four stages run by `run_stage` (`src/osp/stages.py`). Each writes a `stage.json` manifest that doubles as the cache record: bootstrap (cached by `bootstrap_key`) → customize → assemble (keyed by the build hash) → test (never cached).
+- A build is four stages run by `run_stage` (`src/osp/stages.py`). Each writes a `stage.json` manifest that doubles as the cache record: bootstrap (cached by `bootstrap_key`) → customize → assemble (keyed by the build hash, which also covers the osp code, so a code change reruns customize/assemble once) → test (never cached).
 - Only bootstrap is family-specific. A backend module in `src/osp/backends/` exposes `SUPPORTED`, `bootstrap_key(profile)` and `bootstrap(profile, rootfs, runner)`, and is registered in `backends/__init__.py`. New Linux families add a backend; Windows will get its own stage set (separate spec).
 - Every external command goes through `osp.run.Runner`, which logs per stage and redacts secret values. Unit tests swap in `RecordingRunner` and assert on recorded commands instead of executing them.
 - `src/osp/payload/` is shipped *into* images: `install-to-disk` (bash), systemd units, `osp-ready` and the Calamares config. Payload content is part of the build hash.

@@ -62,6 +62,16 @@ def test_bootstrap_key_stable_and_sensitive():
     assert debian.bootstrap_key(make()) != debian.bootstrap_key(make("ubuntu", "noble"))
 
 
+def test_bootstrap_key_covers_backend_source(tmp_path, monkeypatch):
+    src = tmp_path / "debian.py"
+    src.write_bytes(Path(debian.__file__).read_bytes())
+    monkeypatch.setattr(debian, "_SOURCE", src)
+    before = debian.bootstrap_key(make())
+    assert debian.bootstrap_key(make()) == before
+    src.write_bytes(src.read_bytes().replace(b'"--variant=minbase"', b'"--variant=essential"'))
+    assert debian.bootstrap_key(make()) != before
+
+
 @pytest.mark.container
 def test_bootstrap_bookworm_creates_live_capable_rootfs(tmp_path):
     rootfs = tmp_path / "rootfs"

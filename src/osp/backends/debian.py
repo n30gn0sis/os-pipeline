@@ -54,8 +54,14 @@ def bootstrap_packages(profile: Profile) -> list[str]:
     return [*BASE_PACKAGES, FLAVORS[profile.flavor].kernel]
 
 
+# This module's own source is part of the bootstrap key, so a change to the
+# mmdebstrap invocation below never reuses a cache built by the old one.
+_SOURCE = Path(__file__)
+
+
 def bootstrap_key(profile: Profile) -> str:
     material = {
+        "backend_source": hashlib.sha256(_SOURCE.read_bytes()).hexdigest(),
         "flavor": profile.flavor,
         "release": profile.release,
         "arch": profile.arch,

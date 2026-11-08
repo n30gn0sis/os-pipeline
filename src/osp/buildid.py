@@ -6,7 +6,7 @@ import json
 from datetime import date
 from importlib import resources
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from osp.profile import Profile
 
@@ -24,15 +24,24 @@ def _files_under(path: Path) -> list[Path]:
     return [path] if path.is_file() else []
 
 
-def _update_with_traversable(h, node, prefix: str) -> None:
+def _is_package_source(rel: str) -> bool:
+    """Package files that shape a build: Python modules, the schemas and the image payload."""
+    return rel.endswith(".py") or rel.startswith(("osp/schema/", "osp/payload/"))
+
+
+def _update_with_traversable(h, node, prefix: str, include: Callable[[str], bool] = lambda _rel: True) -> None:
     if node.is_dir():
         for child in sorted(node.iterdir(), key=lambda c: c.name):
-            _update_with_traversable(h, child, f"{prefix}/{child.name}")
-    elif node.is_file():
+            if child.name != "__pycache__":
+                _update_with_traversable(h, child, f"{prefix}/{child.name}", include)
+    elif node.is_file() and include(prefix):
         h.update(prefix.encode() + b"\0" + node.read_bytes() + b"\0")
 
 
 def compute_build_hash(profile: Profile, repo_root: Path, secrets: Mapping[str, str]) -> str:
+    """Hash of everything that shapes the customize and assemble output: the merged profile,
+    every referenced file, hook and installer config, the secret digests, and the osp
+    package's own source (*.py, schema/, payload/; __pycache__ skipped)."""
     h = hashlib.sha256()
     h.update(json.dumps(profile.data, sort_keys=True).encode())
     for rel in sorted(referenced_paths(profile)):
@@ -46,9 +55,9 @@ def compute_build_hash(profile: Profile, repo_root: Path, secrets: Mapping[str, 
     # carrying a raw, guessable secret must switch to a keyed hash (HMAC).
     for ref in sorted(secrets):
         h.update(ref.encode() + b"\0" + hashlib.sha256(secrets[ref].encode()).digest())
-    payload = resources.files("osp").joinpath("payload")
-    if payload.is_dir():
-        _update_with_traversable(h, payload, "payload")
+    # The osp code itself (modules, schemas, payload), so a code change never reuses a
+    # customize or assemble result built by older code.
+    _update_with_traversable(h, resources.files("osp"), "osp", _is_package_source)
     return h.hexdigest()
 
 
