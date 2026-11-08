@@ -39,6 +39,11 @@ def compute_build_hash(profile: Profile, repo_root: Path, secrets: Mapping[str, 
         for f in _files_under(repo_root / rel):
             h.update(f.relative_to(repo_root).as_posix().encode() + b"\0")
             h.update(f.read_bytes() + b"\0")
+    # Secrets enter as an unsalted sha256 digest. The build hash is published
+    # (in the artifact name and in build.json), so a digest of a guessable raw
+    # secret would be exposed. This is acceptable because today's secret fields
+    # are SSH public keys and pre-salted crypt password hashes. Any future field
+    # carrying a raw, guessable secret must switch to a keyed hash (HMAC).
     for ref in sorted(secrets):
         h.update(ref.encode() + b"\0" + hashlib.sha256(secrets[ref].encode()).digest())
     payload = resources.files("osp").joinpath("payload")

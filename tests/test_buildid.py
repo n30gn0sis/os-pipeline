@@ -1,3 +1,4 @@
+import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -36,9 +37,48 @@ def test_hash_changes_with_referenced_file_content(tmp_path):
 
 def test_hash_changes_with_secret_value_but_does_not_contain_it(tmp_path):
     p = make(tmp_path)
+    secret = "hunter2-SECRET"
     h1 = compute_build_hash(p, tmp_path, {"env:K": "one"})
     h2 = compute_build_hash(p, tmp_path, {"env:K": "two"})
     assert h1 != h2
+    h3 = compute_build_hash(p, tmp_path, {"env:K": secret})
+    assert secret not in h3
+    assert hashlib.sha256(secret.encode()).hexdigest() not in h3
+
+
+def test_hash_changes_with_merged_profile(tmp_path):
+    p = make(tmp_path)
+    before = compute_build_hash(p, tmp_path, {})
+    changed = Profile(profile_data(
+        files=[{"src": "files/d/", "dest": "/etc/d/"}],
+        hooks={"customize": ["hooks/h.sh"]},
+        packages=["vim"],
+    ), p.source)
+    assert compute_build_hash(changed, tmp_path, {}) != before
+
+
+def test_installer_config_is_referenced_and_hashed(tmp_path):
+    (tmp_path / "installer").mkdir()
+    (tmp_path / "installer" / "i.yaml").write_text("hostname: a")
+    p = Profile(profile_data(installer={"mode": "tui", "config": "installer/i.yaml"}),
+                tmp_path / "profiles" / "t.yaml")
+    assert referenced_paths(p) == ["installer/i.yaml"]
+    before = compute_build_hash(p, tmp_path, {})
+    (tmp_path / "installer" / "i.yaml").write_text("hostname: b")
+    assert compute_build_hash(p, tmp_path, {}) != before
+
+
+def test_payload_tree_is_hashed(tmp_path, monkeypatch):
+    import osp.buildid as buildid
+
+    payload_root = tmp_path / "pkg"
+    (payload_root / "payload").mkdir(parents=True)
+    (payload_root / "payload" / "x").write_text("one")
+    monkeypatch.setattr(buildid.resources, "files", lambda _pkg: payload_root)
+    p = make(tmp_path)
+    before = compute_build_hash(p, tmp_path, {})
+    (payload_root / "payload" / "x").write_text("two")
+    assert compute_build_hash(p, tmp_path, {}) != before
 
 
 def test_artifact_stem(tmp_path):
