@@ -4,7 +4,7 @@ Build purpose-built OS images from declarative YAML profiles. v1 builds Debian a
 
 ## Requirements
 
-- Docker on Linux, or Docker Desktop on Windows, both with privileged containers allowed.
+- Docker on Linux, or Docker Desktop on Windows, with privileged containers allowed. The launcher also detects Podman, but v1 was tested with Docker only.
 - Python 3.11+ on the host for the `osp` launcher.
 - Boot tests use KVM when `/dev/kvm` is available and fall back to slow TCG emulation otherwise.
 
@@ -36,7 +36,7 @@ Profiles live in `profiles/` and combine layers with `extends:`. Secrets (SSH ke
 - Run one build per profile at a time. The work directory is one slot per profile name (`state/work/<profile.name>` in the state volume) and there is no lock.
 - `files[]` entries are installed with mode 0644 (directories 0755). Use a `hooks.customize` script to set executable bits or other modes.
 - `installer/homelab.yaml` is an example. Its `target_disk: /dev/sda` must match the real disk (`/dev/vda` on virtio VMs), and `confirm: true` asks for a typed YES on the console. `osp test --install` supplies its own config (target = the test disk, `confirm: false`) via the kernel command line and does not use the profile's.
-- Bootstrap caches are keyed by flavor, release, arch and the bootstrap package list. After a change to that list the old cache is orphaned until `osp clean --cache`.
+- Bootstrap caches are keyed by flavor, release, arch, apt sources and the bootstrap package list. After a change to any of those the old cache is orphaned until `osp clean --cache`.
 
 ## Verification
 
