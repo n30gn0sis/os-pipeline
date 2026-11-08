@@ -48,7 +48,28 @@ def test_resolve_reports_all_missing():
     with pytest.raises(SecretError) as ei:
         resolve(["env:A", "env:B", "file:/nope/x"], {"A": ""})
     msg = str(ei.value)
-    assert "A" in msg and "B" in msg and "/nope/x" in msg
+    assert "environment variable A" in msg
+    assert "environment variable B" in msg
+    assert "file /nope/x" in msg
+
+
+def test_resolve_reports_unreadable_file(tmp_path):
+    bad = tmp_path / "bad"
+    bad.write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(SecretError) as ei:
+        resolve([f"file:{bad}", "env:A"], {})
+    msg = str(ei.value)
+    assert "unreadable" in msg
+    assert "environment variable A" in msg
+
+
+@pytest.mark.parametrize("content", ["", "  \n\t\n"])
+def test_resolve_treats_empty_file_as_missing(tmp_path, content):
+    empty = tmp_path / "empty"
+    empty.write_text(content)
+    with pytest.raises(SecretError) as ei:
+        resolve([f"file:{empty}"], {})
+    assert "(empty)" in str(ei.value)
 
 
 def test_file_map_from_env():

@@ -46,10 +46,18 @@ def resolve(refs: Iterable[str], environ: Mapping[str, str],
                 missing.append(f"environment variable {value}")
         else:
             path = Path((file_map or {}).get(value, value)).expanduser()
-            if path.is_file():
-                out[ref] = path.read_text(encoding="utf-8").strip()
-            else:
+            if not path.is_file():
                 missing.append(f"file {value}")
+                continue
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                missing.append(f"file {value} (unreadable)")
+                continue
+            if content:
+                out[ref] = content
+            else:
+                missing.append(f"file {value} (empty)")
     if missing:
         raise SecretError("missing secrets: " + ", ".join(missing))
     return out
