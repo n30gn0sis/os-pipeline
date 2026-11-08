@@ -18,3 +18,7 @@ desktop.ini
 dist/
 build/
 out/
+
+# Local git worktrees
+.claude/worktrees/
+.worktrees/
