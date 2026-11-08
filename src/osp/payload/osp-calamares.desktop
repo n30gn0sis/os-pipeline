@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
 Name=Install os-pipeline image
-Exec=sh -c 'grep -qw osp.install=calamares /proc/cmdline && pkexec calamares'
+Exec=sh -c "grep -qwF osp.install=calamares /proc/cmdline && pkexec calamares"
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

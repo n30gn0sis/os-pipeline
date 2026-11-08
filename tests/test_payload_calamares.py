@@ -36,10 +36,12 @@ def test_packages_remove_live_only_packages():
 def test_removelive_drops_osp_live_files():
     script = "\n".join(load("modules", "shellprocess_removelive.conf")["script"])
     for path in ["/etc/xdg/autostart/osp-calamares.desktop", "/etc/polkit-1/rules.d/49-osp-live.rules",
-                 "/etc/systemd/system/osp-ready.service", "/etc/osp"]:
+                 "/etc/systemd/system/osp-ready.service", "/etc/osp",
+                 "/usr/local/sbin/install-to-disk", "/etc/lightdm/lightdm.conf.d/50-osp-autologin.conf",
+                 "osp-installer"]:
         assert path in script
 
 
 def test_autostart_is_gated_on_cmdline():
-    desktop = resources.files("osp").joinpath("payload", "osp-calamares.desktop").read_text()
+    desktop = resources.files("osp").joinpath("payload", "osp-calamares.desktop").read_text(encoding="utf-8")
     assert "osp.install=calamares" in desktop and "pkexec calamares" in desktop
