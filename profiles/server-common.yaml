@@ -1,0 +1,7 @@
+schema_version: 1
+name: server-common
+packages: [openssh-server]
+services:
+  enable: [ssh]
+test:
+  checks: ["systemctl is-active ssh"]

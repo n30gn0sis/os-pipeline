@@ -1,0 +1,14 @@
+schema_version: 1
+name: kiosk
+extends: [base-debian]
+packages: [cage, xwayland, chromium, fonts-dejavu-core]
+users:
+  - name: kiosk
+    groups: [video, render, input]
+files:
+  - src: files/kiosk/bash_profile
+    dest: /home/kiosk/.bash_profile
+live:
+  autologin: true
+test:
+  checks: ["pgrep -x cage"]

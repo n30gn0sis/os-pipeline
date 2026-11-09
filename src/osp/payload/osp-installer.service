@@ -1,0 +1,18 @@
+[Unit]
+Description=os-pipeline unattended installer
+ConditionKernelCommandLine=osp.install=unattended
+After=systemd-user-sessions.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/install-to-disk --unattended
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

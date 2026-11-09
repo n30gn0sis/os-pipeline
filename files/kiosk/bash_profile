@@ -1,0 +1,5 @@
+# Start the kiosk app on the first console only; other ttys get a normal shell.
+if [ "$(tty)" = /dev/tty1 ]; then
+  export WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1
+  exec cage -- chromium --kiosk --no-first-run --noerrdialogs https://example.org
+fi

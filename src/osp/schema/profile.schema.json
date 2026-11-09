@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://os-pipeline.local/schema/profile/1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "distro"],
+  "$defs": {
+    "secretRef": {"type": "string", "pattern": "^(env:[A-Za-z_][A-Za-z0-9_]*|file:.+)$"},
+    "strList": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "properties": {
+    "schema_version": {"const": 1},
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "maxLength": 63},
+    "distro": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family", "flavor", "release", "arch"],
+      "properties": {
+        "family": {"type": "string"},
+        "flavor": {"type": "string"},
+        "release": {"type": "string"},
+        "arch": {"enum": ["amd64"]},
+        "mirror": {"type": "string", "pattern": "^https?://"},
+        "components": {"$ref": "#/$defs/strList"}
+      }
+    },
+    "packages": {"$ref": "#/$defs/strList"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["src", "dest"],
+        "properties": {"src": {"type": "string"}, "dest": {"type": "string", "pattern": "^/"}}
+      }
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]*$"},
+          "groups": {"$ref": "#/$defs/strList"},
+          "shell": {"type": "string", "pattern": "^/"},
+          "ssh_keys_from": {"$ref": "#/$defs/secretRef"},
+          "password_hash_from": {"$ref": "#/$defs/secretRef"}
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enable": {"$ref": "#/$defs/strList"}, "disable": {"$ref": "#/$defs/strList"}}
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"customize": {"$ref": "#/$defs/strList"}}
+    },
+    "live": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"persistence": {"type": "boolean"}, "autologin": {"type": "boolean"}}
+    },
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["display_manager"],
+      "properties": {"display_manager": {"enum": ["lightdm"]}}
+    },
+    "installer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["unattended", "tui", "calamares", "none"]},
+        "config": {"type": "string"}
+      }
+    },
+    "test": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"checks": {"$ref": "#/$defs/strList"}}
+    }
+  }
+}

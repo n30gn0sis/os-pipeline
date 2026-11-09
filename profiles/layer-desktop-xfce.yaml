@@ -1,0 +1,10 @@
+schema_version: 1
+name: layer-desktop-xfce
+packages: [xserver-xorg, xfce4, xfce4-terminal, lightdm, lightdm-gtk-greeter, dbus-x11, polkitd, pkexec, mousepad]
+desktop: {display_manager: lightdm}
+services:
+  enable: [lightdm]
+hooks:
+  customize: [hooks/desktop/graphical-target.sh]
+test:
+  checks: ["systemctl is-active lightdm"]

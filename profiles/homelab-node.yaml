@@ -1,0 +1,16 @@
+schema_version: 1
+name: homelab-node
+extends: [base-debian, server-common]
+packages: [qemu-guest-agent]
+files:
+  - src: files/homelab/sshd_config.d/
+    dest: /etc/ssh/sshd_config.d/
+users:
+  - name: admin
+    groups: [sudo]
+    ssh_keys_from: env:OSP_ADMIN_SSH_KEY
+installer:
+  mode: unattended
+  config: installer/homelab.yaml
+test:
+  checks: ["test -s /home/admin/.ssh/authorized_keys"]

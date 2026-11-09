@@ -1,0 +1,3 @@
+target_disk: /dev/sda
+hostname: homelab-node
+confirm: true

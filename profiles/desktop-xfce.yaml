@@ -1,0 +1,12 @@
+schema_version: 1
+name: desktop-xfce
+extends: [base-ubuntu, layer-desktop-xfce]
+users:
+  - name: live
+    groups: [sudo]
+live:
+  autologin: true
+installer:
+  mode: calamares
+test:
+  checks: ["test -f /etc/calamares/settings.conf"]
